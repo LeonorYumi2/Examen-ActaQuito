@@ -1,0 +1,19 @@
+# Requerimientos No Funcionales (RNF)
+
+Documento derivado fielmente de la línea base obligatoria: `consolidado_requerimientos.md`.
+
+## Catálogo de Requerimientos No Funcionales
+
+| Código | Requerimiento | Necesidad que lo origina | ADR Relacionados |
+| :--- | :--- | :--- | :--- |
+| **RNF-01** | Usabilidad para personas mayores o con poca experiencia: pocos pasos por pantalla, letra y botones grandes, español sencillo y opción de mostrar la contraseña. | Acceso de los usuarios | [ADR-06](./adr/ADR-06-interfaz-uniwind-lottie-reanimated.md), [ADR-08](./adr/ADR-08-navegacion-expo-router.md), [ADR-09](./adr/ADR-09-formularios-react-hook-form-zod.md) |
+| **RNF-02** | Retroalimentación visual inmediata con Lottie y Reanimated para operaciones en proceso, exitosas y fallidas, sin modales genéricos; el botón de envío se bloquea mientras se envía. | Registro de los resultados / rúbrica de diseño | [ADR-06](./adr/ADR-06-interfaz-uniwind-lottie-reanimated.md) |
+| **RNF-03** | Seguridad en el servidor: los permisos por rol y territorio (RLS) y las validaciones de cédula y de votos se aplican en la base de datos, aunque la app sea modificada. | Confidencialidad de la información | [ADR-01](./adr/ADR-01-backend-supabase.md), [ADR-09](./adr/ADR-09-formularios-react-hook-form-zod.md) |
+| **RNF-04** | Protección de datos: las contraseñas nunca se guardan en claro; la sesión y los datos sensibles del teléfono se guardan cifrados y se borran al cerrar sesión, salvo las actas pendientes de envío. | Acceso de los usuarios / Confidencialidad de la información | [ADR-03](./adr/ADR-03-offline-sqlite.md) |
+| **RNF-05** | No duplicación: cada acta tiene un identificador único y se registra una sola vez aunque haya cortes de señal, reintentos automáticos o varios toques del botón. | Registro de los resultados | [ADR-01](./adr/ADR-01-backend-supabase.md), [ADR-03](./adr/ADR-03-offline-sqlite.md), [ADR-05](./adr/ADR-05-arquitectura-limpia-estado.md) |
+| **RNF-06** | Durabilidad sin conexión: lo capturado y pendiente no se pierde aunque se cierre la app o se apague el teléfono; una captura interrumpida se puede retomar y los envíos se reintentan solos. | Conectividad el día de la elección | [ADR-03](./adr/ADR-03-offline-sqlite.md) |
+| **RNF-07** | Evidencia inmutable: la foto y la ubicación originales no cambian al corregir los valores; si se reemplaza una foto, la anterior se conserva en el historial. | Registro de los resultados | [ADR-01](./adr/ADR-01-backend-supabase.md), [ADR-04](./adr/ADR-04-evidencia-camara-gps-mapa.md) |
+| **RNF-08** | Uso eficiente de la red: las fotos se comprimen sin perder legibilidad antes de enviarlas, para redes rurales débiles. | Conectividad el día de la elección | [ADR-04](./adr/ADR-04-evidencia-camara-gps-mapa.md) |
+| **RNF-09** | Tiempo real: el avance y los resultados del panel provincial se actualizan solos en segundos, sin recargar la pantalla. | Seguimiento del escrutinio | [ADR-01](./adr/ADR-01-backend-supabase.md) |
+| **RNF-10** | Estabilidad y compatibilidad: la app funciona sin cerrarse en celulares Android de distintas versiones, incluidos los de gama baja. | Estabilidad de la aplicación | [ADR-04](./adr/ADR-04-evidencia-camara-gps-mapa.md), [ADR-05](./adr/ADR-05-arquitectura-limpia-estado.md), [ADR-07](./adr/ADR-07-plataforma-apk-sentry.md), [ADR-08](./adr/ADR-08-navegacion-expo-router.md), [ADR-09](./adr/ADR-09-formularios-react-hook-form-zod.md) |
+| **RNF-11** | Condiciones de entrega: React Native con Expo, APK instalable en Android, código en Clean Architecture y diseño con los colores de la organización. | Restricciones del proyecto / rúbrica de diseño | [ADR-05](./adr/ADR-05-arquitectura-limpia-estado.md), [ADR-06](./adr/ADR-06-interfaz-uniwind-lottie-reanimated.md), [ADR-07](./adr/ADR-07-plataforma-apk-sentry.md), [ADR-08](./adr/ADR-08-navegacion-expo-router.md) |
