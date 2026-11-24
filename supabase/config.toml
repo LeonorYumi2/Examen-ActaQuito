@@ -1,0 +1,17 @@
+project_id = "actaquito"
+
+[db.seed]
+enabled = false
+
+[auth]
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = false
+enable_confirmations = true
+
+[functions.invitar-usuario]
+entrypoint = "./functions/invitar-usuario/index.mjs"
+# El endpoint valida el token con Supabase Auth antes de procesar el cuerpo.
+verify_jwt = false
