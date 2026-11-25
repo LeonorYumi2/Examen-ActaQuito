@@ -3,10 +3,13 @@ import { randomUUID } from 'expo-crypto';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Controller, useForm, type FieldPath } from 'react-hook-form';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { AuthButton, AuthField, AuthMessage, AuthPanel, AuthProgress } from '@/features/auth/presentation/AuthForm';
 import { useAuth } from '@/features/auth/presentation/auth-state';
-import { repositorioActas } from '../data/repositorio-actas';
+import { cargarRecintoCaptura, repositorioActas } from '../data/repositorio-actas';
+import { borradoresLocales } from '../data/borradores-locales';
+import { guardarBorradorLocal, type BorradorLocal, type EvidenciaActa, type RecintoCaptura } from '../domain/evidencia';
+import { CapturaEvidencia } from './components/CapturaEvidencia';
 import {
   esquemaActa, guardarRegistro, ErrorRegistro, type Borrador, type CamposActa, type Candidatura, type Dignidad, type Mesa,
 } from '../domain/registro';
@@ -40,10 +43,10 @@ export function RegistroActasScreen() {
       <AuthButton label="Volver" secondary onPress={() => router.replace('/')} />
     </AuthPanel>;
   }
-  return <Registro key={access.profile.id} puedeIniciar={access.profile.role === 'veedor'} />;
+  return <Registro key={access.profile.id} puedeIniciar={access.profile.role === 'veedor'} usuario={access.profile.id} />;
 }
 
-function Registro({ puedeIniciar }: { puedeIniciar: boolean }) {
+function Registro({ puedeIniciar, usuario }: { puedeIniciar: boolean; usuario: string }) {
   const [mesas, setMesas] = useState<Mesa[]>();
   const [mesa, setMesa] = useState<Mesa>();
   const [dignidad, setDignidad] = useState<Dignidad>();
@@ -61,7 +64,7 @@ function Registro({ puedeIniciar }: { puedeIniciar: boolean }) {
   }, [intento]);
 
   if (mesa && dignidad) {
-    return <Acta mesa={mesa} dignidad={dignidad} puedeIniciar={puedeIniciar} volver={() => setDignidad(undefined)} />;
+    return <Acta mesa={mesa} dignidad={dignidad} puedeIniciar={puedeIniciar} usuario={usuario} volver={() => setDignidad(undefined)} />;
   }
   if (mesa) {
     return <AuthPanel title="Elige la dignidad" description={`${mesa.nombre} · JRV ${String(mesa.numero).padStart(3, '0')}`}>
@@ -84,50 +87,62 @@ function Registro({ puedeIniciar }: { puedeIniciar: boolean }) {
   );
 }
 
-function Acta({ mesa, dignidad, puedeIniciar, volver }: {
-  mesa: Mesa; dignidad: Dignidad; puedeIniciar: boolean; volver: () => void;
+function Acta({ mesa, dignidad, puedeIniciar, usuario, volver }: {
+  mesa: Mesa; dignidad: Dignidad; puedeIniciar: boolean; usuario: string; volver: () => void;
 }) {
-  const [datos, setDatos] = useState<{ candidaturas: Candidatura[]; borrador: Borrador | null }>();
+  const usuarioLocal = puedeIniciar && Platform.OS !== 'web' ? usuario : undefined;
+  const [datos, setDatos] = useState<{
+    candidaturas: Candidatura[]; borrador: Borrador | null; local: BorradorLocal | null; recinto?: RecintoCaptura;
+  }>();
   const [error, setError] = useState<string>();
   const [intento, setIntento] = useState(0);
   useEffect(() => {
     let vigente = true;
-    repositorioActas.cargar(mesa, dignidad).then((resultado) => {
-      if (vigente) setDatos(resultado);
+    Promise.all([
+      repositorioActas.cargar(mesa, dignidad),
+      usuarioLocal ? borradoresLocales.cargar(usuarioLocal, mesa, dignidad) : null,
+      usuarioLocal ? cargarRecintoCaptura(mesa).catch(() => undefined) : undefined,
+    ]).then(([resultado, local, recinto]) => {
+      if (vigente) setDatos({ ...resultado, local, recinto });
     }).catch((problema: unknown) => {
       if (vigente) setError(mensaje(problema));
     });
     return () => { vigente = false; };
-  }, [mesa, dignidad, intento]);
+  }, [mesa, dignidad, intento, usuarioLocal]);
 
   return (
     <AuthPanel title={dignidades[dignidad]} description={`${mesa.nombre} · JRV ${String(mesa.numero).padStart(3, '0')}`}>
       {!datos && !error && <AuthProgress text="Cargando borrador…" />}
       <AuthMessage message={error} />
       {error && <AuthButton label="Reintentar" onPress={() => { setError(undefined); setIntento(intento + 1); }} />}
-      {datos && (puedeIniciar || datos.borrador
-        ? <FormularioActa mesa={mesa} dignidad={dignidad} candidaturas={datos.candidaturas} borrador={datos.borrador} volver={volver} />
-        : <AuthMessage message="Aún no hay un borrador del veedor para esta mesa y dignidad." />)}
-      {(!datos || (!puedeIniciar && !datos.borrador)) && <AuthButton label="Volver" secondary onPress={volver} />}
+      {datos && puedeIniciar && !usuarioLocal && <AuthMessage message="La captura de actas requiere la aplicación móvil." />}
+      {datos && (usuarioLocal || (!puedeIniciar && datos.borrador)
+        ? <FormularioActa mesa={mesa} dignidad={dignidad} candidaturas={datos.candidaturas} borrador={datos.borrador}
+            usuarioLocal={usuarioLocal} local={datos.local} recinto={datos.recinto} volver={volver} />
+        : !puedeIniciar && <AuthMessage message="Aún no hay un borrador del veedor para esta mesa y dignidad." />)}
+      {(!datos || (puedeIniciar ? !usuarioLocal : !datos.borrador)) && <AuthButton label="Volver" secondary onPress={volver} />}
     </AuthPanel>
   );
 }
 
-function FormularioActa({ mesa, dignidad, candidaturas, borrador, volver }: {
+function FormularioActa({ mesa, dignidad, candidaturas, borrador, usuarioLocal, local, recinto, volver }: {
   mesa: Mesa; dignidad: Dignidad; candidaturas: Candidatura[]; borrador: Borrador | null; volver: () => void;
+  usuarioLocal?: string; local: BorradorLocal | null; recinto?: RecintoCaptura;
 }) {
   const siglas = useMemo(() => candidaturas.map((c) => c.sigla), [candidaturas]);
   const esquema = useMemo(() => esquemaActa(siglas), [siglas]);
-  const id = useRef<string>(borrador?.id ?? '');
+  const id = useRef<string>(local?.id ?? borrador?.id ?? '');
   const intento = useRef<{ huella: string; operacion: string } | null>(null);
   const guardando = useRef(false);
+  const [evidencia, setEvidencia] = useState<EvidenciaActa>({ foto: local?.foto, ubicacion: local?.ubicacion });
+  const [capturando, setCapturando] = useState(false);
   const [version, setVersion] = useState(borrador?.version);
   const [error, setError] = useState<string>();
   const [confirmado, setConfirmado] = useState(false);
   const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<CamposActa>({
     resolver: zodResolver(esquema),
     mode: 'onChange',
-    defaultValues: {
+    defaultValues: local?.campos ?? {
       votos: Object.fromEntries(siglas.map((sigla) => [sigla, borrador ? String(borrador.cifras.votos[sigla]) : ''])),
       blancos: borrador ? String(borrador.cifras.blancos) : '',
       nulos: borrador ? String(borrador.cifras.nulos) : '',
@@ -135,11 +150,19 @@ function FormularioActa({ mesa, dignidad, candidaturas, borrador, volver }: {
     },
   });
   async function guardar(campos: CamposActa) {
-    if (guardando.current) return;
+    if (guardando.current || capturando) return;
     guardando.current = true;
     setError(undefined);
     setConfirmado(false);
     try {
+      if (usuarioLocal) {
+        if (!id.current) id.current = randomUUID();
+        await guardarBorradorLocal(borradoresLocales, usuarioLocal, mesa, dignidad, {
+          ...evidencia, id: id.current, campos,
+        }, siglas);
+        setConfirmado(true);
+        return;
+      }
       const huella = JSON.stringify(campos);
       if (!id.current) id.current = randomUUID();
       if (intento.current?.huella !== huella) intento.current = { huella, operacion: randomUUID() };
@@ -164,9 +187,9 @@ function FormularioActa({ mesa, dignidad, candidaturas, borrador, volver }: {
   ];
   return (
     <>
-      <AuthMessage message="Borrador sin enviar. La foto y la ubicación se añadirán antes del envío." />
+      <AuthMessage message="Borrador sin enviar." />
       <AuthMessage message={error ?? errors.votos?.root?.message} />
-      {confirmado && <AuthMessage success message={`Borrador guardado · versión ${version}.`} />}
+      {confirmado && <AuthMessage success message={usuarioLocal ? "Borrador guardado en este teléfono. Pendiente de envío." : `Borrador guardado · versión ${version}.`} />}
       {campos.map(({ nombre, etiqueta }) => (
         <Controller key={nombre} control={control} name={nombre} render={({ field, fieldState }) => (
           <AuthField label={etiqueta} value={typeof field.value === 'string' ? field.value : ''}
@@ -174,8 +197,10 @@ function FormularioActa({ mesa, dignidad, candidaturas, borrador, volver }: {
             keyboardType="number-pad" editable={!isSubmitting} error={fieldState.error?.message} />
         )} />
       ))}
-      <AuthButton label={isSubmitting ? 'Guardando…' : 'Guardar borrador'} busy={isSubmitting} onPress={() => { void handleSubmit(guardar)(); }} />
-      <AuthButton label="Volver" secondary disabled={isSubmitting} onPress={volver} />
+      {usuarioLocal && <CapturaEvidencia recinto={recinto} evidencia={evidencia} disabled={isSubmitting}
+        onBusy={setCapturando} onChange={(nueva) => { setEvidencia(nueva); setConfirmado(false); }} />}
+      <AuthButton disabled={capturando} label={isSubmitting ? 'Guardando…' : 'Guardar borrador'} busy={isSubmitting} onPress={() => { void handleSubmit(guardar)(); }} />
+      <AuthButton label="Volver" secondary disabled={isSubmitting || capturando} onPress={volver} />
     </>
   );
 }

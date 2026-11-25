@@ -1,5 +1,7 @@
 import { mobileSupabase } from '@/features/auth/data/supabase-client';
-import { ErrorRegistro, type RepositorioActas } from '../domain/registro';
+import { z } from 'zod';
+import type { RecintoCaptura } from '../domain/evidencia';
+import { ErrorRegistro, type Mesa, type RepositorioActas } from '../domain/registro';
 
 const errorDeLectura = () => new ErrorRegistro('No pudimos cargar los datos de la mesa. Revisa tu conexión y vuelve a intentar.');
 
@@ -51,3 +53,20 @@ export const repositorioActas: RepositorioActas = {
     return data;
   },
 };
+
+export async function cargarRecintoCaptura(mesa: Mesa): Promise<RecintoCaptura> {
+  const db = mobileSupabase();
+  const recinto = await db.from('recintos').select('latitud,longitud,parroquias(canton_codigo)')
+    .eq('codigo', mesa.recinto).single();
+  const datos = z.object({
+    latitud: z.number().min(-90).max(90),
+    longitud: z.number().min(-180).max(180),
+    parroquias: z.object({ canton_codigo: z.string() }),
+  }).safeParse(recinto.data);
+  if (recinto.error || !datos.success) throw errorDeLectura();
+  const configuracion = await db.from('configuracion_captura').select('margen_gps_metros')
+    .eq('canton_codigo', datos.data.parroquias.canton_codigo).single();
+  const margen = z.number().int().positive().safeParse(configuracion.data?.margen_gps_metros);
+  if (configuracion.error || !margen.success) throw errorDeLectura();
+  return { latitud: datos.data.latitud, longitud: datos.data.longitud, margenMetros: margen.data };
+}

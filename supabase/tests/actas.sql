@@ -29,6 +29,10 @@ declare
     reserva jsonb;
 begin
     if has_function_privilege('anon', 'public.guardar_borrador_acta(uuid,uuid,text,smallint,text,jsonb,numeric,numeric,numeric)', 'execute')
+       or has_function_privilege('service_role', 'public.guardar_borrador_acta(uuid,uuid,text,smallint,text,jsonb,numeric,numeric,numeric)', 'execute')
+       or not has_function_privilege('authenticated', 'public.guardar_borrador_acta(uuid,uuid,text,smallint,text,jsonb,numeric,numeric,numeric)', 'execute')
+       or has_table_privilege('service_role', 'public.actas', 'INSERT')
+       or has_table_privilege('service_role', 'public.actas_revisiones', 'INSERT')
        or has_table_privilege('authenticated', 'public.actas', 'INSERT')
        or has_table_privilege('authenticated', 'public.actas_revisiones', 'UPDATE')
        or has_column_privilege('authenticated', 'public.actas_revisiones', 'actor_cedula', 'SELECT') then
@@ -183,7 +187,59 @@ begin
 end;
 $$;
 
+-- Un JWT sin AMR password debe fallar incluso para un usuario ya activado.
+select set_config('request.jwt.claims',
+    jsonb_build_object('sub', pg_temp.persona(1), 'role', 'authenticated')::text, true);
+do $$
+begin
+    if exists (select 1 from public.actas) or exists (select version from public.actas_revisiones) then
+        raise exception 'Un JWT sin AMR password pudo leer actas';
+    end if;
+end;
+$$;
+
+do $$
+begin
+    begin
+        insert into public.actas_revisiones (acta_id, version) values (gen_random_uuid(), 1);
+        raise exception 'El cliente pudo insertar directamente en el historial';
+    exception when insufficient_privilege then null;
+    end;
+    begin
+        update public.actas set estado = 'borrador';
+        raise exception 'El cliente pudo actualizar directamente un acta';
+    exception when insufficient_privilege then null;
+    end;
+end;
+$$;
+
 reset role;
+
+-- Provoca un fallo en el trigger, después de actualizar la fila vigente.
+-- La violación del UUID debe revertir tanto el cambio como la nueva revisión.
+select pg_temp.sesion(2);
+do $$
+declare
+    objetivo constant uuid := '10000000-0000-4000-8000-000000000001';
+    operacion_original uuid;
+begin
+    select r.operacion_id into strict operacion_original
+    from public.actas_revisiones r where r.acta_id = objetivo and r.version = 1;
+    begin
+        update public.actas set version = 3, operacion_id = operacion_original,
+            blancos = 1, nulos = 1 where id = objetivo;
+        raise exception 'El trigger aceptó un UUID ya utilizado';
+    exception when unique_violation then null;
+    end;
+    if not exists (select 1 from public.actas where id = objetivo and version = 2 and blancos = 2)
+       or (select count(*) from public.actas_revisiones where acta_id = objetivo) <> 2
+       or not exists (select 1 from public.actas_revisiones
+           where acta_id = objetivo and version = 2 and actor_cedula = '1700000027'
+             and recibida_en is not null) then
+        raise exception 'El trigger no conservó la versión vigente, su actor o su historial';
+    end if;
+end;
+$$;
 do $$
 begin
     begin
@@ -196,6 +252,19 @@ begin
         raise exception 'El historial pudo borrarse';
     exception when insufficient_privilege then null;
     end;
+end;
+$$;
+do $$
+begin
+    begin
+        -- CASCADE alcanza el trigger incluso cuando 00500 añade referencias al historial.
+        truncate public.actas_revisiones cascade;
+        raise exception 'El historial pudo truncarse';
+    exception when insufficient_privilege then null;
+    end;
+    if exists (select 1 from public.actas where estado <> 'borrador') then
+        raise exception 'La fase de borradores produjo un estado reportable';
+    end if;
 end;
 $$;
 rollback;

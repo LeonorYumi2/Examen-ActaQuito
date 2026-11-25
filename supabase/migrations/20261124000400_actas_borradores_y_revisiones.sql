@@ -34,6 +34,13 @@ create table public.actas (
     autor_id uuid not null references public.usuarios (id),
     estado text not null default 'borrador' check (estado = 'borrador'),
     creada_en timestamptz not null default clock_timestamp(),
+    version integer not null default 1 check (version > 0),
+    operacion_id uuid not null,
+    votos jsonb not null,
+    blancos integer not null,
+    nulos integer not null,
+    sufragantes integer not null,
+    check (actaquito_privado.cifras_acta_validas(votos, blancos, nulos, sufragantes)),
     foreign key (recinto_codigo, mesa_numero) references public.mesas_jrv (recinto_codigo, numero),
     unique (recinto_codigo, mesa_numero, dignidad_codigo)
 );
@@ -53,6 +60,36 @@ create table public.actas_revisiones (
     check (actaquito_privado.cifras_acta_validas(votos, blancos, nulos, sufragantes))
 );
 
+-- Se ejecuta con los permisos de la RPC que escribe el acta.
+create function actaquito_privado.registrar_revision_acta()
+returns trigger language plpgsql set search_path = ''
+as $$
+begin
+    if tg_op = 'INSERT' then
+        if new.version <> 1 or new.autor_id is distinct from auth.uid() then
+            raise sqlstate '42501' using message = 'La primera revisión debe corresponder al autor del acta';
+        end if;
+    elsif new.version <> old.version + 1
+        or (new.id, new.recinto_codigo, new.mesa_numero, new.dignidad_codigo, new.autor_id, new.creada_en)
+            is distinct from
+           (old.id, old.recinto_codigo, old.mesa_numero, old.dignidad_codigo, old.autor_id, old.creada_en) then
+        raise sqlstate '22023' using message = 'La revisión debe avanzar una versión y conservar la identidad del acta';
+    end if;
+
+    insert into public.actas_revisiones (
+        acta_id, version, operacion_id, actor_id, actor_cedula, votos, blancos, nulos, sufragantes
+    )
+    select new.id, new.version, new.operacion_id, u.id, u.cedula, new.votos, new.blancos, new.nulos, new.sufragantes
+    from public.usuarios u where u.id = auth.uid();
+    if not found then
+        raise sqlstate '42501' using message = 'El actor de la revisión no está disponible';
+    end if;
+    return null;
+end;
+$$;
+create trigger actas_registrar_revision after insert or update on public.actas
+for each row execute function actaquito_privado.registrar_revision_acta();
+
 create function actaquito_privado.impedir_cambiar_revision_acta()
 returns trigger language plpgsql set search_path = ''
 as $$
@@ -65,8 +102,9 @@ for each statement execute function actaquito_privado.impedir_cambiar_revision_a
 
 alter table public.actas enable row level security;
 alter table public.actas_revisiones enable row level security;
-revoke all on public.actas, public.actas_revisiones from public, anon, authenticated;
-grant select on public.actas to authenticated;
+revoke all on public.actas, public.actas_revisiones from public, anon, authenticated, service_role;
+grant select (id, recinto_codigo, mesa_numero, dignidad_codigo, autor_id, estado, creada_en)
+    on public.actas to authenticated;
 grant select (acta_id, version, operacion_id, actor_id, recibida_en, votos, blancos, nulos, sufragantes)
     on public.actas_revisiones to authenticated;
 
@@ -134,22 +172,27 @@ begin
         raise sqlstate '22023' using message = 'Los votos deben corresponder a las cinco candidaturas de la dignidad';
     end if;
     if anterior.id is null then
-        insert into public.actas (id, recinto_codigo, mesa_numero, dignidad_codigo, autor_id)
-        values (acta, recinto, mesa, dignidad, actor);
+        insert into public.actas (id, recinto_codigo, mesa_numero, dignidad_codigo, autor_id,
+            operacion_id, votos, blancos, nulos, sufragantes)
+        values (acta, recinto, mesa, dignidad, actor, operacion, votos_por_sigla, blancos, nulos, sufragantes)
+        returning version into siguiente;
+    else
+        update public.actas a
+        set version = anterior.version + 1, operacion_id = operacion, votos = votos_por_sigla,
+            blancos = guardar_borrador_acta.blancos, nulos = guardar_borrador_acta.nulos,
+            sufragantes = guardar_borrador_acta.sufragantes
+        where a.id = anterior.id
+        returning a.version into strict siguiente;
     end if;
-    select coalesce(max(r.version), 0) + 1 into siguiente
-        from public.actas_revisiones r where r.acta_id = acta;
-    insert into public.actas_revisiones (acta_id, version, operacion_id, actor_id, actor_cedula, votos, blancos, nulos, sufragantes)
-    select acta, siguiente, operacion, actor, u.cedula, votos_por_sigla, blancos, nulos, sufragantes
-    from public.usuarios u where u.id = actor;
     return siguiente;
 end;
 $$;
 
 revoke execute on function actaquito_privado.cifras_acta_validas(jsonb, numeric, numeric, numeric),
-    actaquito_privado.impedir_cambiar_revision_acta() from public, anon, authenticated;
+    actaquito_privado.registrar_revision_acta(),
+    actaquito_privado.impedir_cambiar_revision_acta() from public, anon, authenticated, service_role;
 revoke execute on function public.guardar_borrador_acta(uuid, uuid, text, smallint, text, jsonb, numeric, numeric, numeric)
-    from public, anon, authenticated;
+    from public, anon, authenticated, service_role;
 grant execute on function public.guardar_borrador_acta(uuid, uuid, text, smallint, text, jsonb, numeric, numeric, numeric)
     to authenticated;
 

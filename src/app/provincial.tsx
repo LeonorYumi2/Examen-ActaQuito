@@ -1,5 +1,5 @@
-import { RoleHomeScreen } from '@/features/auth/presentation/screens/AuthScreens';
+import { ProvincialDashboardScreen } from '@/features/monitoreo/presentation/screens/ProvincialDashboardScreen';
 
 export default function ProvincialRoute() {
-  return <RoleHomeScreen role="provincial" />;
+  return <ProvincialDashboardScreen />;
 }

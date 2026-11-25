@@ -1,6 +1,5 @@
-import { AccesoRegistroActas } from '@/features/actas/presentation/RegistroActasScreen';
-import { RoleHomeScreen } from '@/features/auth/presentation/screens/AuthScreens';
+import { RecintoDashboardScreen } from '@/features/recintos/presentation/screens/RecintoDashboardScreen';
 
 export default function RecintoRoute() {
-  return <AccesoRegistroActas><RoleHomeScreen role="recinto" /></AccesoRegistroActas>;
+  return <RecintoDashboardScreen />;
 }

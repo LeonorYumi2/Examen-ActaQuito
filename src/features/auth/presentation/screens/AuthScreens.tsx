@@ -5,6 +5,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { authMessage, type PasswordFlow, type Role } from '../../domain/auth';
 import { loginForm, passwordForm, recoveryForm } from '../../domain/forms';
 import { AuthButton, AuthField, AuthMessage, AuthPanel, AuthProgress } from '../AuthForm';
+import { SignOutConfirmModal } from '../components/SignOutConfirmModal';
 import { useAuth } from '../auth-state';
 import { passwordRoute, roleHome } from '../routes';
 
@@ -189,6 +190,7 @@ const roleLabels: Record<Role, { title: string; description: string }> = {
 export function RoleHomeScreen({ role }: { role: Role }) {
   const access = useAuth((state) => state.access);
   const signOut = useAuth((state) => state.signOut);
+  const [modalVisible, setModalVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   if (!access) return <OpeningScreen />;
@@ -200,6 +202,7 @@ export function RoleHomeScreen({ role }: { role: Role }) {
     setError(undefined);
     try {
       await signOut();
+      setModalVisible(false);
       router.replace('/auth/login');
     } catch (issue) {
       setError(authMessage(issue));
@@ -209,11 +212,31 @@ export function RoleHomeScreen({ role }: { role: Role }) {
   }
 
   return (
-    <AuthPanel title={title} description={description}>
-      <AuthMessage message={`Sesión iniciada como ${access.profile.name}.`} success />
-      {access.offline && <AuthMessage message="Sin conexión. Se conserva tu sesión en este dispositivo." />}
-      <AuthMessage message={error} />
-      <AuthButton label={busy ? 'Cerrando sesión…' : 'Cerrar sesión'} busy={busy} onPress={() => { void leave(); }} />
-    </AuthPanel>
+    <>
+      <AuthPanel title={title} description={description}>
+        <AuthMessage message={`Sesión iniciada como ${access.profile.name}.`} success />
+        {access.offline && <AuthMessage message="Sin conexión. Se conserva tu sesión en este dispositivo." />}
+        <AuthMessage message={error} />
+        <AuthButton
+          label="Cerrar sesión"
+          busy={busy}
+          onPress={() => {
+            setError(undefined);
+            setModalVisible(true);
+          }}
+        />
+      </AuthPanel>
+
+      <SignOutConfirmModal
+        visible={modalVisible}
+        busy={busy}
+        onCancel={() => {
+          if (!busy) setModalVisible(false);
+        }}
+        onConfirm={() => {
+          void leave();
+        }}
+      />
+    </>
   );
 }

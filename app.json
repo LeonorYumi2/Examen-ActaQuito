@@ -39,7 +39,15 @@
         }
       ],
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      ["expo-camera", {
+        "cameraPermission": "ActaQuito usa la cámara para fotografiar actas electorales.",
+        "recordAudioAndroid": false,
+        "microphonePermission": false
+      }],
+      ["expo-location", {
+        "locationWhenInUsePermission": "ActaQuito usa tu ubicación al registrar la evidencia del acta."
+      }]
     ],
     "experiments": {
       "typedRoutes": true,

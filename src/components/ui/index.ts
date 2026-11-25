@@ -9,3 +9,4 @@ export * from './vector-icon';
 export * from './quito-pattern';
 export * from './quito-skyline-illustration';
 export * from './floating-bottom-bar';
+export * from './institutional-header';
