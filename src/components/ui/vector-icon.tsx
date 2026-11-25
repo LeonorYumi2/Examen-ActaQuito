@@ -14,7 +14,9 @@ export type VectorIconName =
   | 'table'
   | 'sun-geometric'
   | 'chevron-right'
-  | 'radio';
+  | 'radio'
+  | 'eye'
+  | 'eye-off';
 
 export interface VectorIconProps {
   name: VectorIconName;
@@ -331,6 +333,118 @@ export const VectorIcon: React.FC<VectorIconProps> = ({
               borderBottomWidth: 0,
               borderColor: color,
               marginTop: 1,
+            }}
+          />
+        </View>
+      );
+
+    case 'eye':
+      return (
+        <View style={[{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }, style]}>
+          {/* Párpado superior */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 0.94,
+              height: s * 0.44,
+              borderTopLeftRadius: s * 0.47,
+              borderTopRightRadius: s * 0.47,
+              borderTopWidth: 1.8,
+              borderLeftWidth: 1.4,
+              borderRightWidth: 1.4,
+              borderColor: color,
+              top: s * 0.28,
+            }}
+          />
+          {/* Párpado inferior */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 0.94,
+              height: s * 0.44,
+              borderBottomLeftRadius: s * 0.47,
+              borderBottomRightRadius: s * 0.47,
+              borderBottomWidth: 1.8,
+              borderLeftWidth: 1.4,
+              borderRightWidth: 1.4,
+              borderColor: color,
+              bottom: s * 0.28,
+            }}
+          />
+          {/* Iris / Pupila central */}
+          <View
+            style={{
+              width: s * 0.36,
+              height: s * 0.36,
+              borderRadius: (s * 0.36) / 2,
+              backgroundColor: color,
+            }}
+          />
+        </View>
+      );
+
+    case 'eye-off':
+      return (
+        <View style={[{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }, style]}>
+          {/* Párpado superior */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 0.94,
+              height: s * 0.44,
+              borderTopLeftRadius: s * 0.47,
+              borderTopRightRadius: s * 0.47,
+              borderTopWidth: 1.8,
+              borderLeftWidth: 1.4,
+              borderRightWidth: 1.4,
+              borderColor: color,
+              top: s * 0.28,
+            }}
+          />
+          {/* Párpado inferior */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 0.94,
+              height: s * 0.44,
+              borderBottomLeftRadius: s * 0.47,
+              borderBottomRightRadius: s * 0.47,
+              borderBottomWidth: 1.8,
+              borderLeftWidth: 1.4,
+              borderRightWidth: 1.4,
+              borderColor: color,
+              bottom: s * 0.28,
+            }}
+          />
+          {/* Iris / Pupila central */}
+          <View
+            style={{
+              width: s * 0.36,
+              height: s * 0.36,
+              borderRadius: (s * 0.36) / 2,
+              backgroundColor: color,
+            }}
+          />
+          {/* Recorte de separación diagonal */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 1.25,
+              height: 4.5,
+              backgroundColor: BrandColors.blancoSuperficie,
+              transform: [{ rotate: '-45deg' }],
+              borderRadius: 2,
+            }}
+          />
+          {/* Línea diagonal tachada auténtica */}
+          <View
+            style={{
+              position: 'absolute',
+              width: s * 1.2,
+              height: 2,
+              backgroundColor: color,
+              transform: [{ rotate: '-45deg' }],
+              borderRadius: 1,
             }}
           />
         </View>

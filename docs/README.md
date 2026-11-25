@@ -23,7 +23,7 @@
 3. [Supuestos Adoptados (S-01 a S-12)](./supuestos.md)
 4. [Registro de Decisiones Arquitectónicas (ADR-01 a ADR-09)](./decisiones-arquitectonicas.md)
    - [ADR-01: Backend, seguridad en el servidor, historial inmutable y tiempo real](./adr/ADR-01-backend-supabase.md)
-   - [ADR-02: Creación de cuentas, verificación de correo y envío con Resend](./adr/ADR-02-cuentas-resend.md)
+   - [ADR-02: Creación de cuentas, verificación de correo y envío con Gmail SMTP](./adr/ADR-02-cuentas-gmail-smtp.md)
    - [ADR-03: Registro sin conexión, sincronización y sesión cifrada en el teléfono](./adr/ADR-03-offline-sqlite.md)
    - [ADR-04: Evidencia del acta: fotografía, ubicación GPS y mapa](./adr/ADR-04-evidencia-camara-gps-mapa.md)
    - [ADR-05: Arquitectura del código y manejo de estado](./adr/ADR-05-arquitectura-limpia-estado.md)

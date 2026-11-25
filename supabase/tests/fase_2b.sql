@@ -2,6 +2,19 @@
 begin;
 select set_config('request.jwt.claims', '{"amr":[{"method":"password"}]}', true);
 
+-- Simula la fila de método que GoTrue agrega a cada nueva sesión.
+create function pg_temp.simular_metodo_auth(persona uuid, metodo text)
+returns void language plpgsql as $$
+declare
+    sesion uuid := gen_random_uuid();
+begin
+    insert into auth.sessions (id, user_id, created_at, updated_at)
+    values (sesion, persona, now(), now());
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+    values (gen_random_uuid(), sesion, metodo, now(), now());
+end;
+$$;
+
 -- Simula Supabase Auth y verifica los permisos SQL. No envía correo.
 do $$
 declare
@@ -13,6 +26,10 @@ begin
         'public.reservar_invitacion(uuid,text,text,text,text,text,text)', 'EXECUTE')
         or has_function_privilege('authenticated', 'public.gestionar_invitacion(text,text)', 'EXECUTE')
         or has_function_privilege('authenticated', 'public.confirmar_invitacion(uuid,boolean)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'actaquito_privado.registrar_primer_ingreso_password()', 'EXECUTE')
+        or has_table_privilege('authenticated', 'actaquito_privado.invitaciones', 'UPDATE')
+        or has_table_privilege('authenticated', 'auth.mfa_amr_claims', 'INSERT')
+        or has_table_privilege('anon', 'auth.mfa_amr_claims', 'INSERT')
         or has_function_privilege('anon', 'public.asignar_coordinador(text,uuid)', 'EXECUTE')
         or has_table_privilege('authenticated', 'public.asignaciones_veedor', 'UPDATE')
         or has_column_privilege('authenticated', 'public.usuarios', 'cedula', 'SELECT') then
@@ -40,7 +57,7 @@ begin
         end if;
         insert into auth.users (id, email, invited_at, email_confirmed_at, encrypted_password, raw_user_meta_data)
         values (persona.id, persona.correo, now(), case when persona.orden <> 6 then now() end,
-            case when persona.orden in (4, 6) then '' else 'hash-simulado' end,
+            case persona.orden when 4 then 'hash-temporal-gotrue' when 6 then '' else 'hash-del-titular' end,
             jsonb_build_object('actaquito_invitacion', reserva->>'id'));
         if persona.orden = 6 then
             -- El reenvío está disponible con Auth creado y el perfil aún pendiente.
@@ -63,6 +80,18 @@ begin
             'Prueba', 'Fase Dos', '0999999999');
         if repetida->>'usuarioId' is distinct from persona.id::text then
             raise exception 'El reintento no devolvió la identidad original';
+        end if;
+        if persona.orden = 4 then
+            perform pg_temp.simular_metodo_auth(persona.id, 'otp');
+            if actaquito_privado.rol_activo(persona.id) is not null then
+                raise exception 'El hash temporal hizo operativo al veedor';
+            end if;
+        elsif persona.orden = 6 then
+            if actaquito_privado.rol_activo(persona.id) is not null then
+                raise exception 'La invitación pendiente hizo operativo al coordinador';
+            end if;
+        else
+            perform pg_temp.simular_metodo_auth(persona.id, 'password');
         end if;
         if persona.orden = 2 or persona.orden = 5 then
             perform set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
@@ -215,7 +244,7 @@ begin
     begin
         perform public.asignar_veedor('R01', 1::smallint, '00000000-0000-4000-8000-000000000004', (
             select id from public.asignaciones_veedor where recinto_codigo = 'R01' and mesa_numero = 1 and fin is null));
-        raise exception 'Se reemplazó con una cuenta todavía sin contraseña';
+        raise exception 'Se reemplazó a un veedor con hash temporal y sin login con contraseña';
     exception when invalid_parameter_value then null;
     end;
 end;
@@ -233,7 +262,19 @@ end;
 $$;
 
 reset role;
-update auth.users set encrypted_password = 'hash-simulado' where id = '00000000-0000-4000-8000-000000000004';
+-- Establecer la contraseña tampoco equivale a demostrar su uso.
+update auth.users set encrypted_password = 'hash-del-titular' where id = '00000000-0000-4000-8000-000000000004';
+select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000004', 'recovery');
+do $$
+begin
+    if actaquito_privado.rol_activo('00000000-0000-4000-8000-000000000004') is not null then
+        raise exception 'Una sesión de recuperación activó al veedor';
+    end if;
+end;
+$$;
+select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000004', 'password');
+-- El relevo sigue disponible cuando la sesión que probó el método se cierra.
+delete from auth.sessions where user_id = '00000000-0000-4000-8000-000000000004';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000002', true);
 select public.asignar_veedor('R01', 1::smallint, '00000000-0000-4000-8000-000000000004', (
@@ -279,8 +320,28 @@ begin
         jsonb_build_object('actaquito_invitacion', reserva->>'id'));
 end;
 $$;
-update auth.users set email_confirmed_at = now(), encrypted_password = 'hash-simulado'
+update auth.users set email_confirmed_at = now(), encrypted_password = 'hash-temporal-gotrue'
 where id = '00000000-0000-4000-8000-000000000006';
+select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000006', 'otp');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
+do $$
+begin
+    begin
+        perform public.asignar_coordinador('R01', '00000000-0000-4000-8000-000000000006');
+        raise exception 'Se reemplazó al coordinador con una invitación aceptada y hash temporal';
+    exception when invalid_parameter_value then null;
+    end;
+    if (select count(*) from public.asignaciones_coordinador
+        where recinto_codigo = 'R01' and coordinador_id = '00000000-0000-4000-8000-000000000002'
+            and fin is null) <> 1 then
+        raise exception 'La invitación aceptada alteró el relevo o el historial';
+    end if;
+end;
+$$;
+reset role;
+update auth.users set encrypted_password = 'hash-del-titular' where id = '00000000-0000-4000-8000-000000000006';
+select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000006', 'password');
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
 select public.asignar_coordinador('R01', '00000000-0000-4000-8000-000000000006');

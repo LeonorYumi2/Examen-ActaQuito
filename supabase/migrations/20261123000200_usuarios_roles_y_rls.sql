@@ -105,6 +105,8 @@ create table actaquito_privado.invitaciones (
     actor_id uuid references public.usuarios (id),
     auth_id uuid unique references auth.users (id),
     usuario_id uuid unique references public.usuarios (id),
+    primer_ingreso_password_en timestamptz,
+    check (primer_ingreso_password_en is null or auth_id is not null),
     check (usuario_id is null or (auth_id is not null and usuario_id = auth_id)),
     check ((rol = 'veedor') = (recinto_base is not null)),
     check ((rol = 'provincial') = (actor_id is null))
@@ -115,7 +117,9 @@ create function actaquito_privado.rol_activo(persona uuid)
 returns text language sql stable security definer set search_path = ''
 as $$
     select u.rol from public.usuarios u join auth.users a on a.id = u.id
+    join actaquito_privado.invitaciones i on i.usuario_id = u.id
     where u.id = persona and u.habilitado and u.correo = lower(a.email)
+        and i.primer_ingreso_password_en is not null
         and a.email_confirmed_at is not null and nullif(a.encrypted_password, '') is not null
         and (a.banned_until is null or a.banned_until <= now())
 $$;

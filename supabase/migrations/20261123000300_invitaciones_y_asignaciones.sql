@@ -65,6 +65,27 @@ create trigger actaquito_vincular_alta_auth
 after insert on auth.users
 for each row execute function actaquito_privado.vincular_alta_auth();
 
+-- GoTrue registra el método en la sesión tras comprobar la contraseña.
+-- El marcador queda en la reserva aunque Auth elimine después esa sesión.
+create function actaquito_privado.registrar_primer_ingreso_password()
+returns trigger language plpgsql security definer set search_path = ''
+as $$
+begin
+    update actaquito_privado.invitaciones i
+    set primer_ingreso_password_en = new.created_at
+    from auth.sessions s join auth.users a on a.id = s.user_id
+    where s.id = new.session_id and i.auth_id = a.id
+        and i.correo = lower(a.email) and a.email_confirmed_at is not null
+        and i.primer_ingreso_password_en is null;
+    return new;
+end;
+$$;
+
+create trigger actaquito_registrar_primer_ingreso_password
+after insert on auth.mfa_amr_claims
+for each row when (new.authentication_method = 'password')
+execute function actaquito_privado.registrar_primer_ingreso_password();
+
 create function public.reservar_invitacion(
     actor uuid, recinto text, correo_nuevo text, cedula_nueva text,
     nombres_nuevos text, apellidos_nuevos text, telefono_nuevo text
@@ -186,7 +207,7 @@ begin
         raise sqlstate '42501' using message = 'Solo el coordinador provincial puede asignar coordinadores';
     end if;
     if actaquito_privado.rol_activo(coordinador) is distinct from 'recinto' then
-        raise sqlstate '22023' using message = 'El coordinador entrante debe confirmar el correo y establecer su contraseña';
+        raise sqlstate '22023' using message = 'El coordinador entrante debe confirmar el correo e iniciar sesión con su contraseña';
     end if;
     select a.* into anterior from public.asignaciones_coordinador a
         where a.recinto_codigo = recinto and a.fin is null;
@@ -223,7 +244,7 @@ begin
     end if;
     if not exists (select 1 from public.usuarios u where u.id = veedor and u.recinto_base = recinto
                    and actaquito_privado.rol_activo(u.id) = 'veedor') then
-        raise sqlstate '22023' using message = 'Se requiere un veedor habilitado de este recinto con primer acceso completo';
+        raise sqlstate '22023' using message = 'Se requiere un veedor habilitado de este recinto que ya inició sesión con su contraseña';
     end if;
 
     select a.* into anterior from public.asignaciones_veedor a
@@ -248,7 +269,8 @@ $$;
 
 revoke execute on function actaquito_privado.bloquear_recinto(text),
     actaquito_privado.rol_invitado(uuid, text), actaquito_privado.bloquear_correo(text),
-    actaquito_privado.vincular_alta_auth() from public, anon, authenticated;
+    actaquito_privado.vincular_alta_auth(), actaquito_privado.registrar_primer_ingreso_password()
+    from public, anon, authenticated;
 revoke execute on function public.reservar_invitacion(uuid, text, text, text, text, text, text),
     public.confirmar_invitacion(uuid, boolean), public.gestionar_invitacion(text, text), public.asignar_coordinador(text, uuid),
     public.asignar_veedor(text, smallint, uuid, uuid) from public, anon, authenticated;
