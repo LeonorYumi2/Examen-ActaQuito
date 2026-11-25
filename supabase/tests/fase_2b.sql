@@ -2,16 +2,21 @@
 begin;
 select set_config('request.jwt.claims', '{"amr":[{"method":"password"}]}', true);
 
--- Simula la fila de método que GoTrue agrega a cada nueva sesión.
-create function pg_temp.simular_metodo_auth(persona uuid, metodo text)
+-- Emula el JWT que PostgREST entrega a PostgreSQL tras verificar su firma.
+create function pg_temp.simular_activacion(persona uuid, metodo text, sujeto uuid default null)
 returns void language plpgsql as $$
 declare
-    sesion uuid := gen_random_uuid();
+    sub_anterior text := current_setting('request.jwt.claim.sub', true);
+    claims_anteriores text := current_setting('request.jwt.claims', true);
 begin
-    insert into auth.sessions (id, user_id, created_at, updated_at)
-    values (sesion, persona, now(), now());
-    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
-    values (gen_random_uuid(), sesion, metodo, now(), now());
+    perform set_config('request.jwt.claim.sub', persona::text, true);
+    perform set_config('request.jwt.claims', jsonb_strip_nulls(jsonb_build_object(
+        'sub', coalesce(sujeto, persona), 'role', 'authenticated',
+        'amr', case when metodo is not null then jsonb_build_array(jsonb_build_object('method', metodo)) end
+    ))::text, true);
+    perform public.activar_cuenta();
+    perform set_config('request.jwt.claim.sub', coalesce(sub_anterior, ''), true);
+    perform set_config('request.jwt.claims', coalesce(claims_anteriores, ''), true);
 end;
 $$;
 
@@ -26,10 +31,9 @@ begin
         'public.reservar_invitacion(uuid,text,text,text,text,text,text)', 'EXECUTE')
         or has_function_privilege('authenticated', 'public.gestionar_invitacion(text,text)', 'EXECUTE')
         or has_function_privilege('authenticated', 'public.confirmar_invitacion(uuid,boolean)', 'EXECUTE')
-        or has_function_privilege('authenticated', 'actaquito_privado.registrar_primer_ingreso_password()', 'EXECUTE')
+        or has_function_privilege('anon', 'public.activar_cuenta()', 'EXECUTE')
+        or not has_function_privilege('authenticated', 'public.activar_cuenta()', 'EXECUTE')
         or has_table_privilege('authenticated', 'actaquito_privado.invitaciones', 'UPDATE')
-        or has_table_privilege('authenticated', 'auth.mfa_amr_claims', 'INSERT')
-        or has_table_privilege('anon', 'auth.mfa_amr_claims', 'INSERT')
         or has_function_privilege('anon', 'public.asignar_coordinador(text,uuid)', 'EXECUTE')
         or has_table_privilege('authenticated', 'public.asignaciones_veedor', 'UPDATE')
         or has_column_privilege('authenticated', 'public.usuarios', 'cedula', 'SELECT') then
@@ -82,16 +86,25 @@ begin
             raise exception 'El reintento no devolvió la identidad original';
         end if;
         if persona.orden = 4 then
-            perform pg_temp.simular_metodo_auth(persona.id, 'otp');
+            begin
+                perform pg_temp.simular_activacion(persona.id, 'otp');
+                raise exception 'Un JWT de invitación activó al veedor';
+            exception when insufficient_privilege then null;
+            end;
             if actaquito_privado.rol_activo(persona.id) is not null then
                 raise exception 'El hash temporal hizo operativo al veedor';
             end if;
         elsif persona.orden = 6 then
+            begin
+                perform pg_temp.simular_activacion(persona.id, 'password');
+                raise exception 'Un correo pendiente pudo activar la cuenta';
+            exception when insufficient_privilege then null;
+            end;
             if actaquito_privado.rol_activo(persona.id) is not null then
                 raise exception 'La invitación pendiente hizo operativo al coordinador';
             end if;
         else
-            perform pg_temp.simular_metodo_auth(persona.id, 'password');
+            perform pg_temp.simular_activacion(persona.id, 'password');
         end if;
         if persona.orden = 2 or persona.orden = 5 then
             perform set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
@@ -264,17 +277,45 @@ $$;
 reset role;
 -- Establecer la contraseña tampoco equivale a demostrar su uso.
 update auth.users set encrypted_password = 'hash-del-titular' where id = '00000000-0000-4000-8000-000000000004';
-select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000004', 'recovery');
 do $$
 begin
+    begin
+        perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000004', 'recovery');
+        raise exception 'Un JWT de recuperación pudo activar la cuenta';
+    exception when insufficient_privilege then null;
+    end;
+    begin
+        perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000004', null);
+        raise exception 'Un JWT sin AMR pudo activar la cuenta';
+    exception when insufficient_privilege then null;
+    end;
+    begin
+        perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000004', 'password',
+            '00000000-0000-4000-8000-000000000003');
+        raise exception 'Un JWT de otra identidad pudo activar la cuenta';
+    exception when insufficient_privilege then null;
+    end;
     if actaquito_privado.rol_activo('00000000-0000-4000-8000-000000000004') is not null then
         raise exception 'Una sesión de recuperación activó al veedor';
     end if;
 end;
 $$;
-select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000004', 'password');
--- El relevo sigue disponible cuando la sesión que probó el método se cierra.
-delete from auth.sessions where user_id = '00000000-0000-4000-8000-000000000004';
+do $$
+declare
+    primer_ingreso timestamptz;
+begin
+    perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000004', 'password');
+    select i.primer_ingreso_password_en into primer_ingreso from actaquito_privado.invitaciones i
+        where i.auth_id = '00000000-0000-4000-8000-000000000004';
+    perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000004', 'password');
+    if primer_ingreso is null or primer_ingreso is distinct from (
+        select i.primer_ingreso_password_en from actaquito_privado.invitaciones i
+        where i.auth_id = '00000000-0000-4000-8000-000000000004'
+    ) then
+        raise exception 'La activación no conservó la marca inicial';
+    end if;
+end;
+$$;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000002', true);
 select public.asignar_veedor('R01', 1::smallint, '00000000-0000-4000-8000-000000000004', (
@@ -322,7 +363,15 @@ end;
 $$;
 update auth.users set email_confirmed_at = now(), encrypted_password = 'hash-temporal-gotrue'
 where id = '00000000-0000-4000-8000-000000000006';
-select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000006', 'otp');
+do $$
+begin
+    begin
+        perform pg_temp.simular_activacion('00000000-0000-4000-8000-000000000006', 'otp');
+        raise exception 'La invitación aceptada activó al coordinador entrante';
+    exception when insufficient_privilege then null;
+    end;
+end;
+$$;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
 do $$
@@ -341,7 +390,7 @@ end;
 $$;
 reset role;
 update auth.users set encrypted_password = 'hash-del-titular' where id = '00000000-0000-4000-8000-000000000006';
-select pg_temp.simular_metodo_auth('00000000-0000-4000-8000-000000000006', 'password');
+select pg_temp.simular_activacion('00000000-0000-4000-8000-000000000006', 'password');
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
 select public.asignar_coordinador('R01', '00000000-0000-4000-8000-000000000006');

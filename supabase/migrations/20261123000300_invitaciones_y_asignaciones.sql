@@ -65,26 +65,35 @@ create trigger actaquito_vincular_alta_auth
 after insert on auth.users
 for each row execute function actaquito_privado.vincular_alta_auth();
 
--- GoTrue registra el método en la sesión tras comprobar la contraseña.
--- El marcador queda en la reserva aunque Auth elimine después esa sesión.
-create function actaquito_privado.registrar_primer_ingreso_password()
-returns trigger language plpgsql security definer set search_path = ''
+-- Solo el titular puede registrar la activación con una sesión de contraseña.
+create function public.activar_cuenta()
+returns void language plpgsql security definer set search_path = ''
 as $$
+declare
+    persona uuid := auth.uid();
+    claims jsonb := auth.jwt();
 begin
+    if persona is null
+        or claims ->> 'sub' is distinct from persona::text
+        or claims ->> 'role' is distinct from 'authenticated'
+        or not coalesce((claims -> 'amr') @> '[{"method":"password"}]'::jsonb, false) then
+        raise sqlstate '42501' using message = 'Se requiere iniciar sesión con contraseña';
+    end if;
+
     update actaquito_privado.invitaciones i
-    set primer_ingreso_password_en = new.created_at
-    from auth.sessions s join auth.users a on a.id = s.user_id
-    where s.id = new.session_id and i.auth_id = a.id
-        and i.correo = lower(a.email) and a.email_confirmed_at is not null
+    set primer_ingreso_password_en = clock_timestamp()
+    from auth.users a join public.usuarios u on u.id = a.id
+    where a.id = persona and i.auth_id = a.id and i.usuario_id = u.id
+        and i.correo = lower(a.email) and u.correo = i.correo and u.habilitado
+        and a.email_confirmed_at is not null and nullif(a.encrypted_password, '') is not null
+        and (a.banned_until is null or a.banned_until <= now())
         and i.primer_ingreso_password_en is null;
-    return new;
+
+    if not found and actaquito_privado.rol_activo(persona) is null then
+        raise sqlstate '42501' using message = 'La cuenta no tiene un perfil vinculado y habilitado';
+    end if;
 end;
 $$;
-
-create trigger actaquito_registrar_primer_ingreso_password
-after insert on auth.mfa_amr_claims
-for each row when (new.authentication_method = 'password')
-execute function actaquito_privado.registrar_primer_ingreso_password();
 
 create function public.reservar_invitacion(
     actor uuid, recinto text, correo_nuevo text, cedula_nueva text,
@@ -269,14 +278,14 @@ $$;
 
 revoke execute on function actaquito_privado.bloquear_recinto(text),
     actaquito_privado.rol_invitado(uuid, text), actaquito_privado.bloquear_correo(text),
-    actaquito_privado.vincular_alta_auth(), actaquito_privado.registrar_primer_ingreso_password()
+    actaquito_privado.vincular_alta_auth()
     from public, anon, authenticated;
-revoke execute on function public.reservar_invitacion(uuid, text, text, text, text, text, text),
+revoke execute on function public.activar_cuenta(), public.reservar_invitacion(uuid, text, text, text, text, text, text),
     public.confirmar_invitacion(uuid, boolean), public.gestionar_invitacion(text, text), public.asignar_coordinador(text, uuid),
     public.asignar_veedor(text, smallint, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.reservar_invitacion(uuid, text, text, text, text, text, text),
     public.confirmar_invitacion(uuid, boolean), public.gestionar_invitacion(text, text) to service_role;
-grant execute on function public.asignar_coordinador(text, uuid), public.asignar_veedor(text, smallint, uuid, uuid)
+grant execute on function public.activar_cuenta(), public.asignar_coordinador(text, uuid), public.asignar_veedor(text, smallint, uuid, uuid)
     to authenticated;
 
 commit;

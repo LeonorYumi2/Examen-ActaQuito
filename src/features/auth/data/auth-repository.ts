@@ -73,6 +73,15 @@ async function claimsFor(session: Session) {
   return { sessionId, methods: amr?.map(({ method }) => method) ?? [], user: data.user };
 }
 
+async function activateAccount() {
+  const { error, status } = await mobileSupabase().rpc('activar_cuenta');
+  if (status === 0) throw new ConnectionProblem('No pudimos verificar la activación. Revisa tu conexión.');
+  if (error?.code === '42501') {
+    throw new AuthProblem('La cuenta no tiene un perfil habilitado de ActaQuito. Contacta a tu coordinador.');
+  }
+  if (error) throw new AuthProblem('No pudimos activar la cuenta. Inténtalo de nuevo o contacta a tu coordinador.');
+}
+
 async function queryProfile(id: string): Promise<Profile> {
   return queryClient.fetchQuery({
     queryKey: ['auth', 'profile', id],
@@ -147,6 +156,9 @@ export const authRepository: AuthRepository = {
         await discardSession();
         return guest;
       }
+      if (saved?.kind !== 'operational' || saved.sessionId !== claims.sessionId || saved.profile.id !== session.user.id) {
+        await activateAccount();
+      }
       const profile = await queryProfile(session.user.id);
       await remember({ kind: 'operational', profile, sessionId: claims.sessionId });
       return { kind: 'operational', profile, offline: false };
@@ -168,6 +180,7 @@ export const authRepository: AuthRepository = {
     try {
       const claims = await claimsFor(data.session);
       if (!claims.methods.includes('password')) throw new AuthProblem('Inicia sesión con correo y contraseña.');
+      await activateAccount();
       const profile = await queryProfile(data.session.user.id);
       await remember({ kind: 'operational', profile, sessionId: claims.sessionId });
       return { kind: 'operational', profile, offline: false };

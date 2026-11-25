@@ -50,6 +50,7 @@ function fixture(method, options = {}) {
   };
   const client = {
     auth,
+    async rpc(name) { events.push(['rpc', name]); return options.activationResult ?? { status: 204 }; },
     from(table) {
       events.push(['table', table]);
       return {
@@ -77,7 +78,7 @@ function fixture(method, options = {}) {
     './supabase-client': {
       mobileSupabase: () => client,
       profileStorageKey: profileKey,
-      readJwtPayload: () => ({ sub: 'user-1', role: 'authenticated', session_id: 'session-1', amr: [{ method }] }),
+      readJwtPayload: () => ({ sub: 'user-1', role: 'authenticated', session_id: 'session-1', amr: method ? [{ method }] : undefined }),
     },
   });
   return { authRepository, events, cache };
@@ -132,7 +133,19 @@ test('solo el inicio de sesión con AMR password habilita el perfil bajo RLS', a
   const access = await password.authRepository.signIn('test@example.test', 'test-password');
   assert.equal(access.kind, 'operational');
   assert.equal(access.profile.role, 'veedor');
-  assert.deepEqual(password.events.slice(1), [['table', 'usuarios'], ['columns', 'id,rol,nombres,apellidos,habilitado']]);
+  assert.deepEqual(password.events.slice(1), [['rpc', 'activar_cuenta'], ['table', 'usuarios'], ['columns', 'id,rol,nombres,apellidos,habilitado']]);
+});
+
+test('un JWT sin AMR no intenta activar la cuenta ni buscar el perfil', async () => {
+  const { authRepository, events } = fixture(undefined);
+  await assert.rejects(authRepository.signIn('test@example.test', 'test-password'), /Inicia sesión/);
+  assert.deepEqual(events, ['signIn', 'signOut']);
+});
+
+test('un rechazo de activación impide consultar el perfil', async () => {
+  const { authRepository, events } = fixture('password', { activationResult: { status: 403, error: { code: '42501' } } });
+  await assert.rejects(authRepository.signIn('test@example.test', 'test-password'), /perfil habilitado/);
+  assert.deepEqual(events, ['signIn', ['rpc', 'activar_cuenta'], 'signOut']);
 });
 
 test('el rol se cierra cuando PostgreSQL no devuelve un perfil habilitado', async () => {

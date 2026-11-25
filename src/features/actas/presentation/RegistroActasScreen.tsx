@@ -1,0 +1,186 @@
+import { zodResolver } from '@hookform/resolvers/zod';
+import { randomUUID } from 'expo-crypto';
+import { Redirect, router } from 'expo-router';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Controller, useForm, type FieldPath } from 'react-hook-form';
+import { StyleSheet, View } from 'react-native';
+import { AuthButton, AuthField, AuthMessage, AuthPanel, AuthProgress } from '@/features/auth/presentation/AuthForm';
+import { useAuth } from '@/features/auth/presentation/auth-state';
+import { repositorioActas } from '../data/repositorio-actas';
+import {
+  esquemaActa, guardarRegistro, ErrorRegistro, type Borrador, type CamposActa, type Candidatura, type Dignidad, type Mesa,
+} from '../domain/registro';
+
+const dignidades = { ALCALDIA: 'Alcaldía', PREFECTURA: 'Prefectura' } as const;
+
+function mensaje(error: unknown) {
+  return error instanceof ErrorRegistro ? error.message : 'No pudimos completar la operación. Inténtalo de nuevo.';
+}
+
+export function AccesoRegistroActas({ children }: { children: ReactNode }) {
+  const access = useAuth((state) => state.access);
+  return (
+    <View style={styles.portal}>
+      {children}
+      {access?.kind === 'operational' && !access.offline && (
+        <View style={styles.access}>
+          <AuthButton label="Registro de actas" secondary onPress={() => router.push('/actas')} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+export function RegistroActasScreen() {
+  const access = useAuth((state) => state.access);
+  if (!access) return null;
+  if (access.kind !== 'operational' || access.profile.role === 'provincial') return <Redirect href="/" />;
+  if (access.offline) {
+    return <AuthPanel title="Actas electorales" description="Este registro necesita conexión.">
+      <AuthButton label="Volver" secondary onPress={() => router.replace('/')} />
+    </AuthPanel>;
+  }
+  return <Registro key={access.profile.id} puedeIniciar={access.profile.role === 'veedor'} />;
+}
+
+function Registro({ puedeIniciar }: { puedeIniciar: boolean }) {
+  const [mesas, setMesas] = useState<Mesa[]>();
+  const [mesa, setMesa] = useState<Mesa>();
+  const [dignidad, setDignidad] = useState<Dignidad>();
+  const [error, setError] = useState<string>();
+  const [intento, setIntento] = useState(0);
+
+  useEffect(() => {
+    let vigente = true;
+    repositorioActas.listarMesas().then((datos) => {
+      if (vigente) setMesas(datos);
+    }).catch((problema: unknown) => {
+      if (vigente) setError(mensaje(problema));
+    });
+    return () => { vigente = false; };
+  }, [intento]);
+
+  if (mesa && dignidad) {
+    return <Acta mesa={mesa} dignidad={dignidad} puedeIniciar={puedeIniciar} volver={() => setDignidad(undefined)} />;
+  }
+  if (mesa) {
+    return <AuthPanel title="Elige la dignidad" description={`${mesa.nombre} · JRV ${String(mesa.numero).padStart(3, '0')}`}>
+      <AuthButton label={dignidades.ALCALDIA} onPress={() => setDignidad('ALCALDIA')} />
+      <AuthButton label={dignidades.PREFECTURA} onPress={() => setDignidad('PREFECTURA')} />
+      <AuthButton label="Cambiar de mesa" secondary onPress={() => setMesa(undefined)} />
+    </AuthPanel>;
+  }
+  return (
+    <AuthPanel title="Actas electorales" description="Selecciona una mesa para abrir un borrador.">
+      {!mesas && !error && <AuthProgress text="Cargando mesas…" />}
+      <AuthMessage message={error ?? (mesas?.length === 0 ? 'No tienes mesas disponibles.' : null)} />
+      {error && <AuthButton label="Reintentar" onPress={() => { setError(undefined); setIntento(intento + 1); }} />}
+      {mesas?.map((item) => (
+        <AuthButton key={`${item.recinto}/${item.numero}`} label={`${item.nombre} · JRV ${String(item.numero).padStart(3, '0')}`}
+          secondary onPress={() => setMesa(item)} />
+      ))}
+      <AuthButton label="Volver a mi inicio" secondary onPress={() => router.replace('/')} />
+    </AuthPanel>
+  );
+}
+
+function Acta({ mesa, dignidad, puedeIniciar, volver }: {
+  mesa: Mesa; dignidad: Dignidad; puedeIniciar: boolean; volver: () => void;
+}) {
+  const [datos, setDatos] = useState<{ candidaturas: Candidatura[]; borrador: Borrador | null }>();
+  const [error, setError] = useState<string>();
+  const [intento, setIntento] = useState(0);
+  useEffect(() => {
+    let vigente = true;
+    repositorioActas.cargar(mesa, dignidad).then((resultado) => {
+      if (vigente) setDatos(resultado);
+    }).catch((problema: unknown) => {
+      if (vigente) setError(mensaje(problema));
+    });
+    return () => { vigente = false; };
+  }, [mesa, dignidad, intento]);
+
+  return (
+    <AuthPanel title={dignidades[dignidad]} description={`${mesa.nombre} · JRV ${String(mesa.numero).padStart(3, '0')}`}>
+      {!datos && !error && <AuthProgress text="Cargando borrador…" />}
+      <AuthMessage message={error} />
+      {error && <AuthButton label="Reintentar" onPress={() => { setError(undefined); setIntento(intento + 1); }} />}
+      {datos && (puedeIniciar || datos.borrador
+        ? <FormularioActa mesa={mesa} dignidad={dignidad} candidaturas={datos.candidaturas} borrador={datos.borrador} volver={volver} />
+        : <AuthMessage message="Aún no hay un borrador del veedor para esta mesa y dignidad." />)}
+      {(!datos || (!puedeIniciar && !datos.borrador)) && <AuthButton label="Volver" secondary onPress={volver} />}
+    </AuthPanel>
+  );
+}
+
+function FormularioActa({ mesa, dignidad, candidaturas, borrador, volver }: {
+  mesa: Mesa; dignidad: Dignidad; candidaturas: Candidatura[]; borrador: Borrador | null; volver: () => void;
+}) {
+  const siglas = useMemo(() => candidaturas.map((c) => c.sigla), [candidaturas]);
+  const esquema = useMemo(() => esquemaActa(siglas), [siglas]);
+  const id = useRef<string>(borrador?.id ?? '');
+  const intento = useRef<{ huella: string; operacion: string } | null>(null);
+  const guardando = useRef(false);
+  const [version, setVersion] = useState(borrador?.version);
+  const [error, setError] = useState<string>();
+  const [confirmado, setConfirmado] = useState(false);
+  const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<CamposActa>({
+    resolver: zodResolver(esquema),
+    mode: 'onChange',
+    defaultValues: {
+      votos: Object.fromEntries(siglas.map((sigla) => [sigla, borrador ? String(borrador.cifras.votos[sigla]) : ''])),
+      blancos: borrador ? String(borrador.cifras.blancos) : '',
+      nulos: borrador ? String(borrador.cifras.nulos) : '',
+      sufragantes: borrador ? String(borrador.cifras.sufragantes) : '',
+    },
+  });
+  async function guardar(campos: CamposActa) {
+    if (guardando.current) return;
+    guardando.current = true;
+    setError(undefined);
+    setConfirmado(false);
+    try {
+      const huella = JSON.stringify(campos);
+      if (!id.current) id.current = randomUUID();
+      if (intento.current?.huella !== huella) intento.current = { huella, operacion: randomUUID() };
+      setVersion(await guardarRegistro(repositorioActas, {
+        id: id.current, operacion: intento.current.operacion, mesa, dignidad,
+      }, campos, siglas));
+      intento.current = null;
+      setConfirmado(true);
+    } catch (problema) {
+      setError(mensaje(problema));
+    } finally {
+      guardando.current = false;
+    }
+  }
+  const campos: { nombre: FieldPath<CamposActa>; etiqueta: string }[] = [
+    ...candidaturas.map((c): { nombre: FieldPath<CamposActa>; etiqueta: string } => ({
+      nombre: `votos.${c.sigla}`, etiqueta: `${c.sigla} · ${c.candidato} · ${c.organizacion}`,
+    })),
+    { nombre: 'nulos', etiqueta: 'Votos nulos' },
+    { nombre: 'blancos', etiqueta: 'Votos en blanco' },
+    { nombre: 'sufragantes', etiqueta: 'Total de sufragantes' },
+  ];
+  return (
+    <>
+      <AuthMessage message="Borrador sin enviar. La foto y la ubicación se añadirán antes del envío." />
+      <AuthMessage message={error ?? errors.votos?.root?.message} />
+      {confirmado && <AuthMessage success message={`Borrador guardado · versión ${version}.`} />}
+      {campos.map(({ nombre, etiqueta }) => (
+        <Controller key={nombre} control={control} name={nombre} render={({ field, fieldState }) => (
+          <AuthField label={etiqueta} value={typeof field.value === 'string' ? field.value : ''}
+            onChangeText={(valor) => { setConfirmado(false); field.onChange(valor); }} onBlur={field.onBlur}
+            keyboardType="number-pad" editable={!isSubmitting} error={fieldState.error?.message} />
+        )} />
+      ))}
+      <AuthButton label={isSubmitting ? 'Guardando…' : 'Guardar borrador'} busy={isSubmitting} onPress={() => { void handleSubmit(guardar)(); }} />
+      <AuthButton label="Volver" secondary disabled={isSubmitting} onPress={volver} />
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  portal: { flex: 1 },
+  access: { padding: 16 },
+});
