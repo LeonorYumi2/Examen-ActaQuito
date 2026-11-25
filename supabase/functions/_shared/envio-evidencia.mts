@@ -62,7 +62,7 @@ function leerMetadatos(valor: FormDataEntryValue | null): Metadatos {
   return { acta, revision, operacion, latitud, longitud, precision_metros, capturada_en, gps_capturado_en };
 }
 
-async function leerAcotado(stream: ReadableStream<Uint8Array> | null, limite: number) {
+export async function leerAcotado(stream: ReadableStream<Uint8Array> | null, limite: number) {
   if (!stream) return new Uint8Array();
   const reader = stream.getReader();
   const partes: Uint8Array[] = [];

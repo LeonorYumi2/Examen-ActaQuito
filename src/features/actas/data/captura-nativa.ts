@@ -74,3 +74,13 @@ export function obtenerUbicacion(recinto: RecintoCaptura) {
     leer: leerGps,
   }, recinto);
 }
+
+export async function capturarGpsCorreccion() {
+  const { ubicacionCorreccion } = await import('../domain/historial-acta');
+  if (!(await Location.requestForegroundPermissionsAsync()).granted) {
+    throw new ErrorRegistro('Concede permiso de ubicación para guardar la corrección.');
+  }
+  const resultado = ubicacionCorreccion.safeParse(await leerGps());
+  if (!resultado.success) throw new ErrorRegistro('No se obtuvo una ubicación GPS válida. Reintenta la captura.');
+  return resultado.data;
+}

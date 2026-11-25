@@ -9,7 +9,7 @@ export type Borrador = { id: string; version: number; cifras: Cifras };
 export interface RepositorioActas {
   listarMesas(): Promise<Mesa[]>;
   cargar(mesa: Mesa, dignidad: Dignidad): Promise<{ candidaturas: Candidatura[]; borrador: Borrador | null }>;
-  guardar(datos: { id: string; operacion: string; mesa: Mesa; dignidad: Dignidad; cifras: Cifras }): Promise<number>;
+  guardar(datos: { id: string; operacion: string; mesa: Mesa; dignidad: Dignidad; cifras: Cifras }, token?: string): Promise<number>;
 }
 
 const entero = z.string().refine(
@@ -46,7 +46,11 @@ export function leerCifras(campos: CamposActa): Cifras {
   };
 }
 
-export class ErrorRegistro extends Error {}
+export class ErrorRegistro extends Error {
+  constructor(mensaje: string, readonly codigo?: string, readonly status?: number) {
+    super(mensaje);
+  }
+}
 
 export async function guardarRegistro(
   repositorio: RepositorioActas,

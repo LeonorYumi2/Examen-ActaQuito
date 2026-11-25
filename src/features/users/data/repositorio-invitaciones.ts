@@ -100,15 +100,16 @@ export const repositorioInvitaciones = {
   async asignarCoordinadorExistente(
     recintoCodigo: string,
     coordinadorId: string
-  ): Promise<{ exito: boolean; mensaje: string }> {
+  ): Promise<{ exito: boolean; mensaje: string; asignacionId?: string }> {
     try {
-      await asignarCoordinador({
+      const res = await asignarCoordinador({
         recinto: recintoCodigo,
         coordinador: coordinadorId,
       });
       return {
         exito: true,
         mensaje: 'Coordinador asignado al recinto exitosamente.',
+        asignacionId: res.asignacionId,
       };
     } catch (error) {
       return {

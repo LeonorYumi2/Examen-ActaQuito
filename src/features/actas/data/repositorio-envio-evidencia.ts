@@ -31,12 +31,22 @@ function solicitudMultipart(entrada: EnvioEvidencia) {
 }
 
 export const repositorioEnvioEvidencia: RepositorioEnvioEvidencia = {
-  async enviar(entrada) {
-    const { data, error } = await mobileSupabase().functions.invoke<unknown>('enviar-evidencia-acta', solicitudMultipart(entrada));
+  async enviar(entrada, token) {
+    const solicitud = solicitudMultipart(entrada);
+    const headers = token ? { ...solicitud.headers, Authorization: 'Bearer ' + token } : solicitud.headers;
+    const { data, error } = await mobileSupabase().functions.invoke<unknown>('enviar-evidencia-acta', {
+      ...solicitud, headers, timeout: 45_000,
+    });
     if (error instanceof FunctionsHttpError) {
       const response: Response = error.context;
       const detalle = rechazo.safeParse(await response.json().catch(() => null));
-      if (detalle.success) throw new ErrorEnvioEvidencia(response.status, detalle.data.codigo, detalle.data.error);
+      const retryAfter = response.headers.get('Retry-After');
+      const demora = retryAfter && /^\d+$/.test(retryAfter)
+        ? Number(retryAfter) * 1000
+        : retryAfter ? Date.parse(retryAfter) - Date.now() : undefined;
+      throw new ErrorEnvioEvidencia(response.status, detalle.success ? detalle.data.codigo : 'envio_http',
+        detalle.success ? detalle.data.error : 'El servidor no pudo confirmar el envío.',
+        Number.isFinite(demora) ? demora : undefined);
     }
     const confirmacion = respuesta.safeParse(data);
     if (error || !confirmacion.success

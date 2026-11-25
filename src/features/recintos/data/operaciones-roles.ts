@@ -5,6 +5,7 @@ export interface RecintoInfo {
   nombre: string;
   parroquiaCodigo: string;
   parroquiaNombre?: string;
+  parroquiaTipo?: 'urbana' | 'rural';
   latitud: number;
   longitud: number;
   totalMesas: number;
@@ -23,7 +24,22 @@ export interface CoordinadorRecintoInfo {
   apellidos: string;
   recintoCodigo: string;
   recintoNombre?: string;
+  parroquiaNombre?: string;
   habilitado: boolean;
+  correo?: string;
+  telefono?: string;
+  cedula?: string;
+  creadoEn?: string;
+}
+
+export interface DetalleRecintoInfo {
+  recinto: RecintoInfo;
+  mesas: MesaJrvInfo[];
+  coordinador: CoordinadorRecintoInfo | null;
+  totalVeedoresAsignados: number;
+  totalActas: number;
+  actasEvidenciadas: number;
+  actasPorDignidad: { alcaldia: number; prefectura: number };
 }
 
 export interface VeedorInfo {
@@ -77,7 +93,10 @@ export interface ResumenProvincial {
 /**
  * Traduce mensajes técnicos de PostgREST / Supabase a mensajes claros en español
  */
-export function traducirErrorSupabase(mensaje: string | undefined): string {
+export function traducirErrorSupabase(mensaje: string | undefined, codigo?: string, status?: number): string {
+  if (codigo === '42501') return 'Permisos insuficientes para consultar esta sección con tu rol actual.';
+  if (status === 0) return 'No fue posible conectar con el servidor. Verifica tu conexión de red.';
+  if (status === 401) return 'La sesión de usuario ha expirado. Por favor inicia sesión nuevamente.';
   if (!mensaje) return 'Error inesperado al consultar los datos del servidor.';
   if (mensaje.includes('schema cache') || mensaje.includes('relationship')) {
     return 'Inconsistencia en la relación de datos del catálogo electoral.';
@@ -100,6 +119,20 @@ export function traducirErrorSupabase(mensaje: string | undefined): string {
  * Utiliza consultas independientes y combinación en capa de datos para garantizar
  * resiliencia ante límites del schema cache de PostgREST.
  */
+type RespuestaConsulta = { error: { code: string; message: string } | null; status: number };
+
+export class ErrorConsultaRol extends Error {
+  constructor(readonly tabla: string, readonly codigo: string, readonly status: number, mensaje: string) {
+    super(traducirErrorSupabase(mensaje, codigo, status));
+  }
+}
+
+function verificarConsulta(tabla: string, { error, status }: RespuestaConsulta) {
+  if (error) throw new ErrorConsultaRol(tabla, error.code, status, error.message);
+}
+
+const columnasCoordinador = 'id,nombres,apellidos,habilitado';
+
 export const operacionesPorRolRepositorio = {
   /**
    * Obtiene el resumen consolidado real para Coordinador Provincial
@@ -113,21 +146,20 @@ export const operacionesPorRolRepositorio = {
       db.from('mesas_jrv').select('recinto_codigo,numero', { count: 'exact', head: true }),
       db.from('usuarios').select('id', { count: 'exact', head: true }).eq('rol', 'recinto'),
       db.from('actas').select('id', { count: 'exact', head: true }),
-      Promise.resolve(
-        db.from('actas_evidencias').select('acta_id', { count: 'exact', head: true })
-      ).catch(() => ({ count: 0, error: null })),
+      db.from('actas_evidencias').select('acta_id', { count: 'exact', head: true }),
     ]);
 
-    if (recintosRes.error) throw new Error(traducirErrorSupabase(recintosRes.error.message));
-    if (mesasRes.error) throw new Error(traducirErrorSupabase(mesasRes.error.message));
-    if (coordinadoresRes.error) throw new Error(traducirErrorSupabase(coordinadoresRes.error.message));
-    if (actasRes.error) throw new Error(traducirErrorSupabase(actasRes.error.message));
+    verificarConsulta('recintos', recintosRes);
+    verificarConsulta('mesas_jrv', mesasRes);
+    verificarConsulta('usuarios', coordinadoresRes);
+    verificarConsulta('actas', actasRes);
+    verificarConsulta('actas_evidencias', evidenciasRes);
 
     const totalRecintos = recintosRes.count ?? 0;
     const totalMesas = mesasRes.count ?? 0;
     const totalCoordinadores = coordinadoresRes.count ?? 0;
     const borradoresRegistrados = actasRes.count ?? 0;
-    const evidenciasConfirmadas = (evidenciasRes as { count?: number } | null)?.count ?? 0;
+    const evidenciasConfirmadas = evidenciasRes.count ?? 0;
 
     return {
       totalRecintos,
@@ -149,20 +181,20 @@ export const operacionesPorRolRepositorio = {
 
     const [recintosRes, parroquiasRes, mesasRes] = await Promise.all([
       db.from('recintos').select('codigo,nombre,parroquia_codigo,latitud,longitud').order('nombre'),
-      db.from('parroquias').select('codigo,nombre'),
+      db.from('parroquias').select('codigo,nombre,tipo'),
       db.from('mesas_jrv').select('recinto_codigo,numero'),
     ]);
 
-    if (recintosRes.error) throw new Error(traducirErrorSupabase(recintosRes.error.message));
-    if (parroquiasRes.error) throw new Error(traducirErrorSupabase(parroquiasRes.error.message));
-    if (mesasRes.error) throw new Error(traducirErrorSupabase(mesasRes.error.message));
+    verificarConsulta('recintos', recintosRes);
+    verificarConsulta('parroquias', parroquiasRes);
+    verificarConsulta('mesas_jrv', mesasRes);
 
     const recintos = recintosRes.data ?? [];
     if (recintos.length === 0) return [];
 
-    const parroquiasMap = new Map<string, string>();
+    const parroquiasMap = new Map<string, { nombre: string; tipo?: 'urbana' | 'rural' }>();
     (parroquiasRes.data ?? []).forEach((p) => {
-      parroquiasMap.set(p.codigo, p.nombre);
+      parroquiasMap.set(p.codigo, { nombre: p.nombre, tipo: p.tipo as 'urbana' | 'rural' });
     });
 
     const conteoMesasPorRecinto: Record<string, number> = {};
@@ -170,15 +202,19 @@ export const operacionesPorRolRepositorio = {
       conteoMesasPorRecinto[m.recinto_codigo] = (conteoMesasPorRecinto[m.recinto_codigo] ?? 0) + 1;
     });
 
-    return recintos.map((r) => ({
-      codigo: r.codigo,
-      nombre: r.nombre,
-      parroquiaCodigo: r.parroquia_codigo,
-      parroquiaNombre: parroquiasMap.get(r.parroquia_codigo),
-      latitud: Number(r.latitud),
-      longitud: Number(r.longitud),
-      totalMesas: conteoMesasPorRecinto[r.codigo] ?? 0,
-    }));
+    return recintos.map((r) => {
+      const pInfo = parroquiasMap.get(r.parroquia_codigo);
+      return {
+        codigo: r.codigo,
+        nombre: r.nombre,
+        parroquiaCodigo: r.parroquia_codigo,
+        parroquiaNombre: pInfo?.nombre,
+        parroquiaTipo: pInfo?.tipo,
+        latitud: Number(r.latitud),
+        longitud: Number(r.longitud),
+        totalMesas: conteoMesasPorRecinto[r.codigo] ?? 0,
+      };
+    });
   },
 
   /**
@@ -188,18 +224,29 @@ export const operacionesPorRolRepositorio = {
   async listarCoordinadoresProvincial(): Promise<CoordinadorRecintoInfo[]> {
     const db = mobileSupabase();
 
-    const [usuariosRes, asignacionesRes, recintosRes] = await Promise.all([
-      db.from('usuarios').select('id,nombres,apellidos,habilitado').eq('rol', 'recinto'),
+    const [usuariosRes, asignacionesRes, recintosRes, parroquiasRes] = await Promise.all([
+      db.from('usuarios').select(columnasCoordinador).eq('rol', 'recinto'),
       db.from('asignaciones_coordinador').select('coordinador_id,recinto_codigo').is('fin', null),
-      db.from('recintos').select('codigo,nombre'),
+      db.from('recintos').select('codigo,nombre,parroquia_codigo'),
+      db.from('parroquias').select('codigo,nombre'),
     ]);
 
-    if (usuariosRes.error) throw new Error(traducirErrorSupabase(usuariosRes.error.message));
-    if (asignacionesRes.error) throw new Error(traducirErrorSupabase(asignacionesRes.error.message));
+    verificarConsulta('usuarios', usuariosRes);
+    verificarConsulta('asignaciones_coordinador', asignacionesRes);
+    verificarConsulta('recintos', recintosRes);
+    verificarConsulta('parroquias', parroquiasRes);
 
-    const recintosMap = new Map<string, string>();
+    const parroquiasMap = new Map<string, string>();
+    (parroquiasRes.data ?? []).forEach((p) => {
+      parroquiasMap.set(p.codigo, p.nombre);
+    });
+
+    const recintosMap = new Map<string, { nombre: string; parroquiaNombre?: string }>();
     (recintosRes.data ?? []).forEach((r) => {
-      recintosMap.set(r.codigo, r.nombre);
+      recintosMap.set(r.codigo, {
+        nombre: r.nombre,
+        parroquiaNombre: parroquiasMap.get(r.parroquia_codigo),
+      });
     });
 
     const asignacionesMap = new Map<string, string>();
@@ -209,15 +256,115 @@ export const operacionesPorRolRepositorio = {
 
     return (usuariosRes.data ?? []).map((u) => {
       const recintoCod = asignacionesMap.get(u.id);
+      const recintoObj = recintoCod ? recintosMap.get(recintoCod) : undefined;
       return {
         id: u.id,
         nombres: u.nombres,
         apellidos: u.apellidos,
         recintoCodigo: recintoCod ?? 'Sin asignar',
-        recintoNombre: recintoCod ? (recintosMap.get(recintoCod) ?? recintoCod) : 'Sin recinto asignado',
+        recintoNombre: recintoObj ? recintoObj.nombre : (recintoCod ?? 'Sin recinto asignado'),
+        parroquiaNombre: recintoObj?.parroquiaNombre,
         habilitado: u.habilitado,
       };
     });
+  },
+
+  /**
+   * Obtiene el detalle completo de un recinto para el panel de detalle
+   */
+  async obtenerDetalleRecinto(recintoCodigo: string): Promise<DetalleRecintoInfo> {
+    const db = mobileSupabase();
+
+    const [recintoRes, mesasRes, asigCoordRes, asigVeedoresRes, actasRes] = await Promise.all([
+      db.from('recintos').select('codigo,nombre,parroquia_codigo,latitud,longitud').eq('codigo', recintoCodigo).single(),
+      db.from('mesas_jrv').select('recinto_codigo,numero').eq('recinto_codigo', recintoCodigo).order('numero'),
+      db.from('asignaciones_coordinador').select('coordinador_id').eq('recinto_codigo', recintoCodigo).is('fin', null).maybeSingle(),
+      db.from('asignaciones_veedor').select('veedor_id,mesa_numero').eq('recinto_codigo', recintoCodigo).is('fin', null),
+      db.from('actas').select('id,dignidad_codigo,mesa_numero,estado').eq('recinto_codigo', recintoCodigo),
+    ]);
+
+    if (recintoRes.error) throw new ErrorConsultaRol('recintos', recintoRes.error.code, recintoRes.status, recintoRes.error.message);
+    verificarConsulta('mesas_jrv', mesasRes);
+    verificarConsulta('asignaciones_coordinador', asigCoordRes);
+    verificarConsulta('asignaciones_veedor', asigVeedoresRes);
+    verificarConsulta('actas', actasRes);
+    const rData = recintoRes.data;
+
+    let parroquiaNombre: string | undefined;
+    let parroquiaTipo: 'urbana' | 'rural' | undefined;
+    const parroquiaRes = await db.from('parroquias').select('nombre,tipo').eq('codigo', rData.parroquia_codigo).maybeSingle();
+    verificarConsulta('parroquias', parroquiaRes);
+    const pData = parroquiaRes.data;
+    if (pData) {
+      parroquiaNombre = pData.nombre;
+      parroquiaTipo = pData.tipo as 'urbana' | 'rural';
+    }
+
+    let coordinador: CoordinadorRecintoInfo | null = null;
+    if (asigCoordRes.data?.coordinador_id) {
+      const usuarioRes = await db
+        .from('usuarios')
+        .select(columnasCoordinador)
+        .eq('id', asigCoordRes.data.coordinador_id)
+        .maybeSingle();
+
+      verificarConsulta('usuarios', usuarioRes);
+      const uData = usuarioRes.data;
+      if (uData) {
+        coordinador = {
+          id: uData.id,
+          nombres: uData.nombres,
+          apellidos: uData.apellidos,
+          recintoCodigo,
+          recintoNombre: rData.nombre,
+          parroquiaNombre,
+          habilitado: uData.habilitado,
+        };
+      }
+    }
+
+    const mesas: MesaJrvInfo[] = (mesasRes.data ?? []).map((m) => ({
+      recintoCodigo: m.recinto_codigo,
+      recintoNombre: rData.nombre,
+      numero: m.numero,
+    }));
+
+    const recinto: RecintoInfo = {
+      codigo: rData.codigo,
+      nombre: rData.nombre,
+      parroquiaCodigo: rData.parroquia_codigo,
+      parroquiaNombre,
+      parroquiaTipo,
+      latitud: Number(rData.latitud),
+      longitud: Number(rData.longitud),
+      totalMesas: mesas.length,
+    };
+
+    const totalVeedoresAsignados = (asigVeedoresRes.data ?? []).length;
+    const actas = actasRes.data ?? [];
+    let actasEvidenciadas = 0;
+    if (actas.length > 0) {
+      const actasIds = actas.map((a) => a.id);
+      const evidenciasRes = await db.from('actas_evidencias')
+        .select('acta_id', { count: 'exact', head: true }).in('acta_id', actasIds);
+      verificarConsulta('actas_evidencias', evidenciasRes);
+      actasEvidenciadas = evidenciasRes.count ?? 0;
+    }
+
+    const actasPorDignidad = {
+      alcaldia: actas.filter((a) => a.dignidad_codigo === 'ALCALDIA').length,
+      prefectura: actas.filter((a) => a.dignidad_codigo === 'PREFECTURA').length,
+    };
+
+    return {
+      recinto,
+      mesas,
+      coordinador,
+      totalVeedoresAsignados,
+      totalActas: actas.length,
+      actasEvidenciadas,
+      actasPorDignidad,
+    };
   },
 
   /**
@@ -355,37 +502,33 @@ export const operacionesPorRolRepositorio = {
     const db = mobileSupabase();
 
     // Consulta actas con las columnas otorgadas a authenticated
-    const { data: actasData, error: actasError } = await db
+    const actasRes = await db
       .from('actas')
       .select('id,recinto_codigo,mesa_numero,dignidad_codigo,autor_id,estado,creada_en,usuarios(nombres,apellidos)')
       .order('creada_en', { ascending: false })
       .limit(50);
 
-    if (actasError) throw new Error(traducirErrorSupabase(actasError.message));
+    verificarConsulta('actas', actasRes);
+    const actasData = actasRes.data;
     if (!actasData || actasData.length === 0) return [];
 
     // Consulta de recintos para resolver nombres de forma desacoplada
     const codigosRecintos = Array.from(new Set(actasData.map((a) => a.recinto_codigo)));
-    const { data: recintosData } = await db
+    const recintosRes = await db
       .from('recintos')
       .select('codigo,nombre')
       .in('codigo', codigosRecintos);
 
+    verificarConsulta('recintos', recintosRes);
+    const recintosData = recintosRes.data;
     const nombresRecinto = new Map<string, string>();
     (recintosData ?? []).forEach((r) => nombresRecinto.set(r.codigo, r.nombre));
 
     // Verificación de evidencias confirmadas
     const actasIds = actasData.map((a) => a.id);
-    let evidenciasSet = new Set<string>();
-    try {
-      const { data: evData } = await db
-        .from('actas_evidencias')
-        .select('acta_id')
-        .in('acta_id', actasIds);
-      (evData ?? []).forEach((e) => evidenciasSet.add(e.acta_id));
-    } catch {
-      // Ignora si tabla de evidencias está ausente
-    }
+    const evidenciasRes = await db.from('actas_evidencias').select('acta_id').in('acta_id', actasIds);
+    verificarConsulta('actas_evidencias', evidenciasRes);
+    const evidenciasSet = new Set((evidenciasRes.data ?? []).map((e) => e.acta_id));
 
     return actasData.map((a) => {
       const autor = a.usuarios as { nombres?: string; apellidos?: string } | null;

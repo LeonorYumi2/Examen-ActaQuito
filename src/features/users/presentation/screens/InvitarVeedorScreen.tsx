@@ -80,7 +80,7 @@ export const InvitarVeedorScreen: React.FC = () => {
       correo: '',
       mesaNumero: undefined,
     },
-    mode: 'onChange',
+    mode: 'onTouched',
   });
 
   const cedulaActual = watch('cedula');
@@ -349,12 +349,18 @@ export const InvitarVeedorScreen: React.FC = () => {
                 render={({ field }) => (
                   <TextInput
                     style={[styles.input, errors.telefono && styles.inputError]}
-                    placeholder="09XXXXXXXX (10 dígitos)"
+                    placeholder="0991234567"
                     placeholderTextColor={BrandColors.textoMuted}
                     value={field.value}
-                    onChangeText={field.onChange}
+                    onChangeText={(texto) => {
+                      let limpio = texto.replace(/\D/g, '');
+                      if (limpio.startsWith('593') && limpio.length > 10) {
+                        limpio = '0' + limpio.slice(3);
+                      }
+                      field.onChange(limpio.slice(0, 10));
+                    }}
                     onBlur={field.onBlur}
-                    keyboardType="phone-pad"
+                    keyboardType="numeric"
                     maxLength={10}
                     editable={!enviando && !!recinto}
                   />

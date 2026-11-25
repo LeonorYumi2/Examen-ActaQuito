@@ -14,13 +14,13 @@ import {
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut, ReduceMotion } from 'react-native-reanimated';
 import {
   Building2,
-  Search,
-  X,
   MapPin,
   Vote,
   Check,
   CheckCircle2,
+  X,
 } from 'lucide-react-native';
+import { CampoBusqueda } from '@/components/ui';
 import {
   BrandColors,
   Elevations,
@@ -129,25 +129,13 @@ export const SelectorRecintoModal: React.FC<SelectorRecintoModalProps> = ({
               </TouchableOpacity>
             </View>
 
-            {/* Buscador Integrado */}
-            <View style={styles.searchContainer}>
-              <Search size={16} color={BrandColors.textoSecundario} style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Buscar por nombre, código o parroquia…"
-                placeholderTextColor={BrandColors.textoMuted}
-                value={busqueda}
-                onChangeText={setBusqueda}
-                autoCapitalize="none"
-                autoCorrect={false}
-                clearButtonMode="while-editing"
-              />
-              {busqueda ? (
-                <TouchableOpacity onPress={() => setBusqueda('')} style={styles.clearSearchButton}>
-                  <X size={14} color={BrandColors.textoSecundario} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
+            {/* Buscador Integrado con botón de limpieza */}
+            <CampoBusqueda
+              valor={busqueda}
+              alCambiar={setBusqueda}
+              placeholder="Buscar por nombre, código o parroquia…"
+              style={styles.searchBarWrapper}
+            />
 
             {/* Lista Desplazable de Recintos */}
             <FlatList
@@ -299,29 +287,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: BrandColors.superficieCalida,
-    borderRadius: Radii.md,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: BrandColors.azulBorde,
-    height: 40,
+  searchBarWrapper: {
     marginBottom: Spacing.sm,
-  },
-  searchIcon: {
-    marginRight: 6,
-  },
-  searchInput: {
-    flex: 1,
-    fontFamily: FontFamilies.bodyRegular,
-    fontSize: 12.5,
-    color: BrandColors.textoPrincipal,
-    height: '100%',
-  },
-  clearSearchButton: {
-    padding: 4,
+    backgroundColor: BrandColors.superficieCalida,
+    height: 42,
   },
   list: {
     maxHeight: 360,

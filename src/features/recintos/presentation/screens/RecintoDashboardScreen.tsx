@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import { BrandColors, Elevations, Radii, Spacing, FontFamilies } from '@/constants/tokens';
 import { InstitutionalHeader } from '@/components/ui/institutional-header';
+import { CampoBusqueda } from '@/components/ui';
 import { useAuth } from '@/features/auth/presentation/auth-state';
 import {
   operacionesPorRolRepositorio,
@@ -38,14 +39,25 @@ import {
   type ActaProvincialInfo,
 } from '@/features/recintos/data/operaciones-roles';
 
-type RecintoTabType = 'mesas' | 'veedores' | 'actas';
+export type RecintoTabType = 'mesas' | 'veedores' | 'actas';
 
-export const RecintoDashboardScreen: React.FC = () => {
+interface RecintoDashboardScreenProps {
+  initialTab?: RecintoTabType;
+}
+
+export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
+  initialTab = 'mesas',
+}) => {
   const access = useAuth((state) => state.access);
   const { width } = useWindowDimensions();
-  const [activeTab, setActiveTab] = useState<RecintoTabType>('mesas');
+  const [activeTab, setActiveTab] = useState<RecintoTabType>(initialTab);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [busqueda, setBusqueda] = useState<string>('');
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const [recinto, setRecinto] = useState<RecintoInfo | null>(null);
   const [mesas, setMesas] = useState<MesaJrvInfo[]>([]);
@@ -90,6 +102,38 @@ export const RecintoDashboardScreen: React.FC = () => {
     void cargarDatos();
   };
 
+  const mesasFiltradas = useMemo(() => {
+    if (!busqueda.trim()) return mesas;
+    const q = busqueda.trim().toLowerCase();
+    return mesas.filter(
+      (m) =>
+        String(m.numero).includes(q) ||
+        `jrv ${m.numero}`.includes(q) ||
+        `jrv #${m.numero}`.includes(q)
+    );
+  }, [mesas, busqueda]);
+
+  const veedoresFiltrados = useMemo(() => {
+    if (!busqueda.trim()) return veedores;
+    const q = busqueda.trim().toLowerCase();
+    return veedores.filter(
+      (v) =>
+        `${v.nombres} ${v.apellidos}`.toLowerCase().includes(q) ||
+        (v.mesaAsignada && String(v.mesaAsignada).includes(q))
+    );
+  }, [veedores, busqueda]);
+
+  const actasFiltradas = useMemo(() => {
+    if (!busqueda.trim()) return actas;
+    const q = busqueda.trim().toLowerCase();
+    return actas.filter(
+      (a) =>
+        a.dignidadCodigo.toLowerCase().includes(q) ||
+        String(a.mesaNumero).includes(q) ||
+        (a.autorNombre && a.autorNombre.toLowerCase().includes(q))
+    );
+  }, [actas, busqueda]);
+
   if (!access) return null;
   if (access.kind !== 'operational' || access.profile.role !== 'recinto') {
     return <Redirect href="/" />;
@@ -112,7 +156,7 @@ export const RecintoDashboardScreen: React.FC = () => {
         style={styles.container}
         contentContainerStyle={[
           styles.contentContainer,
-          { paddingHorizontal: horizontalPadding },
+          { paddingHorizontal: horizontalPadding, paddingBottom: 88 },
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -257,6 +301,14 @@ export const RecintoDashboardScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
+            {/* Search Bar con botón de limpieza instantánea */}
+            <CampoBusqueda
+              valor={busqueda}
+              alCambiar={setBusqueda}
+              placeholder={`Buscar en ${activeTab}…`}
+              style={styles.searchBarWrapper}
+            />
+
             {/* Content List */}
             {loading ? (
               <View style={styles.centerContainer}>
@@ -268,16 +320,20 @@ export const RecintoDashboardScreen: React.FC = () => {
                 {/* TAB: MESAS JRV */}
                 {activeTab === 'mesas' && (
                   <>
-                    {mesas.length === 0 ? (
+                    {mesasFiltradas.length === 0 ? (
                       <View style={styles.emptyState}>
                         <Vote size={28} color={BrandColors.grisAzulado} />
-                        <Text style={styles.emptyStateTitle}>No hay mesas configuradas</Text>
+                        <Text style={styles.emptyStateTitle}>
+                          {busqueda ? 'No hay mesas que coincidan' : 'No hay mesas configuradas'}
+                        </Text>
                         <Text style={styles.emptyStateDesc}>
-                          Este recinto no tiene Juntas Receptoras del Voto registradas.
+                          {busqueda
+                            ? `No se encontraron juntas receptoras con "${busqueda}".`
+                            : 'Este recinto no tiene Juntas Receptoras del Voto registradas.'}
                         </Text>
                       </View>
                     ) : (
-                      mesas.map((m) => {
+                      mesasFiltradas.map((m) => {
                         const veedorMesa = veedores.find((v) => v.mesaAsignada === m.numero);
                         const actasMesa = actas.filter((a) => a.mesaNumero === m.numero);
                         return (
@@ -336,16 +392,20 @@ export const RecintoDashboardScreen: React.FC = () => {
                       </TouchableOpacity>
                     </View>
 
-                    {veedores.length === 0 ? (
+                    {veedoresFiltrados.length === 0 ? (
                       <View style={styles.emptyState}>
                         <Users size={28} color={BrandColors.grisAzulado} />
-                        <Text style={styles.emptyStateTitle}>Sin veedores registrados</Text>
+                        <Text style={styles.emptyStateTitle}>
+                          {busqueda ? 'Sin coincidencias' : 'Sin veedores registrados'}
+                        </Text>
                         <Text style={styles.emptyStateDesc}>
-                          No hay veedores con asignación en este recinto electoral.
+                          {busqueda
+                            ? `No se encontró ningún veedor con "${busqueda}".`
+                            : 'No hay veedores con asignación en este recinto electoral.'}
                         </Text>
                       </View>
                     ) : (
-                      veedores.map((v) => (
+                      veedoresFiltrados.map((v) => (
                         <View key={v.id} style={styles.veedorCard}>
                           <View style={styles.veedorAvatar}>
                             <Text style={styles.veedorAvatarText}>
@@ -389,16 +449,20 @@ export const RecintoDashboardScreen: React.FC = () => {
                 {/* TAB: ACTAS */}
                 {activeTab === 'actas' && (
                   <>
-                    {actas.length === 0 ? (
+                    {actasFiltradas.length === 0 ? (
                       <View style={styles.emptyState}>
                         <FileText size={28} color={BrandColors.grisAzulado} />
-                        <Text style={styles.emptyStateTitle}>Sin actas en este recinto</Text>
+                        <Text style={styles.emptyStateTitle}>
+                          {busqueda ? 'Sin coincidencias' : 'Sin actas en este recinto'}
+                        </Text>
                         <Text style={styles.emptyStateDesc}>
-                          Aún no se han recibido actas de veedores para las mesas de este recinto.
+                          {busqueda
+                            ? `No se encontraron actas con "${busqueda}".`
+                            : 'Aún no se han recibido actas de veedores para las mesas de este recinto.'}
                         </Text>
                       </View>
                     ) : (
-                      actas.map((acta) => (
+                      actasFiltradas.map((acta) => (
                         <View key={acta.id} style={styles.actaCard}>
                           <View style={styles.actaTop}>
                             <View style={styles.actaDignidadBadge}>
@@ -646,6 +710,9 @@ const styles = StyleSheet.create({
     backgroundColor: BrandColors.superficieCalida,
     borderRadius: Radii.lg,
     padding: 3,
+    marginBottom: Spacing.sm,
+  },
+  searchBarWrapper: {
     marginBottom: Spacing.md,
   },
   tabButton: {

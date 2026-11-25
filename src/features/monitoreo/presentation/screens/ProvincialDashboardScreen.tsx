@@ -27,10 +27,17 @@ import {
   RefreshCw,
   Shield,
   FileCheck,
+  ChevronRight,
+  TrendingUp,
+  ShieldCheck,
 } from 'lucide-react-native';
 import { BrandColors, Elevations, Radii, Spacing, FontFamilies } from '@/constants/tokens';
 import { InstitutionalHeader } from '@/components/ui/institutional-header';
+import { CampoBusqueda } from '@/components/ui';
+import { DetalleRecintoModal } from '@/features/recintos/presentation/components';
+import { DetalleCoordinadorModal } from '@/features/users/presentation/components';
 import { useAuth } from '@/features/auth/presentation/auth-state';
+import { useSeguimientoElectoral } from '../hooks/useSeguimientoElectoral';
 import {
   operacionesPorRolRepositorio,
   type RecintoInfo,
@@ -39,15 +46,25 @@ import {
   type ActaProvincialInfo,
 } from '@/features/recintos/data/operaciones-roles';
 
-type TabType = 'recintos' | 'coordinadores' | 'actas';
+export type TabType = 'recintos' | 'coordinadores' | 'actas';
+export type ProvincialSection = 'resumen' | 'recintos' | 'resultados' | 'mapa';
 
-export const ProvincialDashboardScreen: React.FC = () => {
+interface ProvincialDashboardScreenProps {
+  activeSection?: ProvincialSection;
+}
+
+export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps> = ({
+  activeSection = 'resumen',
+}) => {
   const access = useAuth((state) => state.access);
   const { width } = useWindowDimensions();
+  const seguimiento = useSeguimientoElectoral(activeSection === 'resultados' || activeSection === 'mapa');
   const [activeTab, setActiveTab] = useState<TabType>('recintos');
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [busqueda, setBusqueda] = useState<string>('');
+  const [recintoDetalleCodigo, setRecintoDetalleCodigo] = useState<string | null>(null);
+  const [coordinadorDetalle, setCoordinadorDetalle] = useState<CoordinadorRecintoInfo | null>(null);
 
   const [resumen, setResumen] = useState<ResumenProvincial | null>(null);
   const [recintos, setRecintos] = useState<RecintoInfo[]>([]);
@@ -108,7 +125,9 @@ export const ProvincialDashboardScreen: React.FC = () => {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    void cargarDatos();
+    void Promise.allSettled([cargarDatos(), seguimiento.actualizar()]).finally(() => {
+      setRefreshing(false);
+    });
   };
 
   const recintosFiltrados = useMemo(() => {
@@ -166,7 +185,7 @@ export const ProvincialDashboardScreen: React.FC = () => {
         style={styles.container}
         contentContainerStyle={[
           styles.contentContainer,
-          { paddingHorizontal: horizontalPadding },
+          { paddingHorizontal: horizontalPadding, paddingBottom: 88 },
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -200,343 +219,515 @@ export const ProvincialDashboardScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {/* Métricas Compactas Bento (2x2) */}
-        <View style={styles.metricsGrid}>
-          {/* Card 1: Recintos */}
-          <View style={styles.metricCard}>
-            <View style={styles.metricTopRow}>
-              <View style={styles.metricIconBox}>
-                <Building2 size={16} color={BrandColors.azulTitulos} />
-              </View>
-              <Text style={styles.metricLabel}>Recintos</Text>
-            </View>
-            <Text style={styles.metricValue}>
-              {resumen ? resumen.totalRecintos : loading ? '…' : '—'}
-            </Text>
-            <Text style={styles.metricSubtext}>Ámbito Cantón Quito</Text>
-          </View>
-
-          {/* Card 2: Mesas JRV */}
-          <View style={styles.metricCard}>
-            <View style={styles.metricTopRow}>
-              <View style={styles.metricIconBox}>
-                <Vote size={16} color={BrandColors.azulTitulos} />
-              </View>
-              <Text style={styles.metricLabel}>Mesas JRV</Text>
-            </View>
-            <Text style={styles.metricValue}>
-              {resumen ? resumen.totalMesas : loading ? '…' : '—'}
-            </Text>
-            <Text style={styles.metricSubtext}>Juntas Receptoras</Text>
-          </View>
-
-          {/* Card 3: Coordinadores */}
-          <View style={styles.metricCard}>
-            <View style={styles.metricTopRow}>
-              <View style={styles.metricIconBox}>
-                <Users size={16} color={BrandColors.azulTitulos} />
-              </View>
-              <Text style={styles.metricLabel}>Coordinadores</Text>
-            </View>
-            <Text style={styles.metricValue}>
-              {resumen ? resumen.totalCoordinadores : loading ? '…' : '—'}
-            </Text>
-            <Text style={styles.metricSubtext}>Coordinación Recinto</Text>
-          </View>
-
-          {/* Card 4: Borradores vs Confirmadas */}
-          <View style={styles.metricCard}>
-            <View style={styles.metricTopRow}>
-              <View style={styles.metricIconBox}>
-                <FileText size={16} color={BrandColors.azulTitulos} />
-              </View>
-              <Text style={styles.metricLabel}>Borradores</Text>
-            </View>
-            <Text style={styles.metricValue}>
-              {resumen ? resumen.borradoresRegistrados : loading ? '…' : '—'}
-            </Text>
-            <Text style={styles.metricSubtext}>
-              {resumen && resumen.evidenciasConfirmadas > 0
-                ? `${resumen.evidenciasConfirmadas} con evidencia`
-                : 'Sin confirmación aún'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Tab Controls */}
-        <View style={styles.tabBar}>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'recintos' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('recintos')}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.tabButtonText,
-                activeTab === 'recintos' && styles.tabButtonTextActive,
-              ]}
-              numberOfLines={1}
-            >
-              Recintos ({recintos.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.tabButton,
-              activeTab === 'coordinadores' && styles.tabButtonActive,
-            ]}
-            onPress={() => setActiveTab('coordinadores')}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.tabButtonText,
-                activeTab === 'coordinadores' && styles.tabButtonTextActive,
-              ]}
-              numberOfLines={1}
-            >
-              Coordinadores ({coordinadores.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'actas' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('actas')}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.tabButtonText,
-                activeTab === 'actas' && styles.tabButtonTextActive,
-              ]}
-              numberOfLines={1}
-            >
-              Actas ({actas.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Search size={16} color={BrandColors.textoSecundario} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={`Buscar en ${activeTab}…`}
-            placeholderTextColor={BrandColors.textoMuted}
-            value={busqueda}
-            onChangeText={setBusqueda}
-            autoCapitalize="none"
-            clearButtonMode="while-editing"
-          />
-        </View>
-
-        {/* Content list */}
-        {loading && recintos.length === 0 ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="small" color={BrandColors.azulTitulos} />
-            <Text style={styles.loadingText}>Cargando catálogo electoral…</Text>
-          </View>
-        ) : (
-          <View style={styles.listContainer}>
-            {/* TAB: RECINTOS */}
-            {activeTab === 'recintos' && (
-              <>
-                {recintosFiltrados.length === 0 ? (
-                  <View style={styles.emptyCard}>
-                    <Building2 size={28} color={BrandColors.grisAzulado} />
-                    <Text style={styles.emptyTitle}>
-                      {busqueda ? 'No hay recintos que coincidan' : 'No hay recintos registrados'}
-                    </Text>
-                    <Text style={styles.emptyDescription}>
-                      {busqueda
-                        ? `No se encontraron resultados para "${busqueda}".`
-                        : 'El catálogo provincial no cuenta con recintos cargados actualmente.'}
-                    </Text>
+        {/* 1. SECCIÓN: RESUMEN */}
+        {activeSection === 'resumen' && (
+          <>
+            {/* Métricas Compactas Bento (2x2) */}
+            <View style={styles.metricsGrid}>
+              {/* Card 1: Recintos */}
+              <View style={styles.metricCard}>
+                <View style={styles.metricTopRow}>
+                  <View style={styles.metricIconBox}>
+                    <Building2 size={16} color={BrandColors.azulTitulos} />
                   </View>
-                ) : (
-                  recintosFiltrados.map((recinto) => (
-                    <View key={recinto.codigo} style={styles.itemCard}>
-                      <View style={styles.itemHeader}>
-                        <View style={styles.itemTitleGroup}>
-                          <Text style={styles.itemTitle}>{recinto.nombre}</Text>
-                          <View style={styles.itemBadgeRow}>
-                            <View style={styles.chipParroquia}>
-                              <MapPin size={10} color={BrandColors.azulTitulos} />
-                              <Text style={styles.chipParroquiaText}>
-                                {recinto.parroquiaNombre ?? recinto.parroquiaCodigo}
-                              </Text>
-                            </View>
-                            <Text style={styles.chipCodeText}>Cód: {recinto.codigo}</Text>
-                          </View>
-                        </View>
-                        <View style={styles.mesaCountBadge}>
-                          <Text style={styles.mesaCountNumber}>{recinto.totalMesas}</Text>
-                          <Text style={styles.mesaCountLabel}>Mesas</Text>
-                        </View>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </>
-            )}
-
-            {/* TAB: COORDINADORES */}
-            {activeTab === 'coordinadores' && (
-              <>
-                {/* Botón de Acción Principal: Invitar Coordinador */}
-                <View style={styles.sectionActionBar}>
-                  <View style={styles.sectionActionTextGroup}>
-                    <Text style={styles.sectionActionTitle}>Gestión de Personal</Text>
-                    <Text style={styles.sectionActionSubtitle}>
-                      {coordinadores.length} coordinador{coordinadores.length !== 1 ? 'es' : ''} registrado{coordinadores.length !== 1 ? 's' : ''}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.inviteButton}
-                    onPress={() => router.push('/provincial/invitar-coordinador')}
-                    activeOpacity={0.8}
-                  >
-                    <UserPlus size={14} color={BrandColors.blancoSuperficie} />
-                    <Text style={styles.inviteButtonText}>Invitar coordinador</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.metricLabel}>Recintos</Text>
                 </View>
+                <Text style={styles.metricValue}>
+                  {resumen ? resumen.totalRecintos : loading ? '…' : '—'}
+                </Text>
+                <Text style={styles.metricSubtext}>Ámbito Cantón Quito</Text>
+              </View>
 
-                {coordinadoresFiltrados.length === 0 ? (
-                  <View style={styles.emptyCard}>
-                    <Users size={28} color={BrandColors.grisAzulado} />
-                    <Text style={styles.emptyTitle}>
-                      {busqueda ? 'Sin coincidencias' : 'Sin coordinadores registrados'}
-                    </Text>
-                    <Text style={styles.emptyDescription}>
-                      {busqueda
-                        ? `No se encontró ningún coordinador con "${busqueda}".`
-                        : 'No hay coordinadores de recinto asignados en la base de datos.'}
-                    </Text>
+              {/* Card 2: Mesas JRV */}
+              <View style={styles.metricCard}>
+                <View style={styles.metricTopRow}>
+                  <View style={styles.metricIconBox}>
+                    <Vote size={16} color={BrandColors.azulTitulos} />
                   </View>
-                ) : (
-                  coordinadoresFiltrados.map((coord) => (
-                    <View key={coord.id} style={styles.itemCard}>
-                      <View style={styles.coordHeader}>
-                        <View style={styles.coordAvatar}>
-                          <Text style={styles.coordAvatarText}>
-                            {coord.nombres.charAt(0)}
-                            {coord.apellidos.charAt(0)}
-                          </Text>
-                        </View>
-                        <View style={styles.coordInfo}>
-                          <Text style={styles.itemTitle}>
-                            {coord.nombres} {coord.apellidos}
-                          </Text>
-                          <Text style={styles.coordRecinto}>
-                            {coord.recintoNombre ?? 'Sin recinto asignado'}
-                          </Text>
-                        </View>
-                        <View
+                  <Text style={styles.metricLabel}>Mesas JRV</Text>
+                </View>
+                <Text style={styles.metricValue}>
+                  {resumen ? resumen.totalMesas : loading ? '…' : '—'}
+                </Text>
+                <Text style={styles.metricSubtext}>Juntas Receptoras</Text>
+              </View>
+
+              {/* Card 3: Coordinadores */}
+              <View style={styles.metricCard}>
+                <View style={styles.metricTopRow}>
+                  <View style={styles.metricIconBox}>
+                    <Users size={16} color={BrandColors.azulTitulos} />
+                  </View>
+                  <Text style={styles.metricLabel}>Coordinadores</Text>
+                </View>
+                <Text style={styles.metricValue}>
+                  {resumen ? resumen.totalCoordinadores : loading ? '…' : '—'}
+                </Text>
+                <Text style={styles.metricSubtext}>Coordinación Recinto</Text>
+              </View>
+
+              {/* Card 4: Borradores vs Confirmadas */}
+              <View style={styles.metricCard}>
+                <View style={styles.metricTopRow}>
+                  <View style={styles.metricIconBox}>
+                    <FileText size={16} color={BrandColors.azulTitulos} />
+                  </View>
+                  <Text style={styles.metricLabel}>Borradores</Text>
+                </View>
+                <Text style={styles.metricValue}>
+                  {resumen ? resumen.borradoresRegistrados : loading ? '…' : '—'}
+                </Text>
+                <Text style={styles.metricSubtext}>
+                  {resumen && resumen.evidenciasConfirmadas > 0
+                    ? `${resumen.evidenciasConfirmadas} con evidencia`
+                    : 'Sin confirmación aún'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Card de Avance del Escrutinio Provincial */}
+            <View style={styles.escrutinioCard}>
+              <View style={styles.escrutinioTopRow}>
+                <View style={styles.escrutinioIconBox}>
+                  <TrendingUp size={16} color={BrandColors.azulTitulos} />
+                </View>
+                <View style={styles.escrutinioInfo}>
+                  <Text style={styles.escrutinioOverline}>ESCRUTINIO PROVINCIAL</Text>
+                  <Text style={styles.escrutinioTitle}>Avance de Recepción y Cómputo</Text>
+                </View>
+                <View style={styles.escrutinioBadge}>
+                  <Text style={styles.escrutinioBadgeText}>
+                    {resumen && resumen.totalMesas > 0
+                      ? `${Math.round((resumen.borradoresRegistrados / (resumen.totalMesas * 2)) * 100)}%`
+                      : '0%'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.progressBarBg}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.min(
+                        100,
+                        resumen && resumen.totalMesas > 0
+                          ? Math.round((resumen.borradoresRegistrados / (resumen.totalMesas * 2)) * 100)
+                          : 0
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.escrutinioFooter}>
+                {resumen?.borradoresRegistrados ?? 0} actas recibidas de {(resumen?.totalMesas ?? 36) * 2} esperadas (Alcaldía y Prefectura)
+              </Text>
+            </View>
+
+            {/* Atajos de Navegación Rápida */}
+            <View style={styles.quickActionsRow}>
+              <TouchableOpacity
+                style={styles.quickActionBtn}
+                onPress={() => router.push('/provincial/recintos')}
+                activeOpacity={0.8}
+              >
+                <Building2 size={16} color={BrandColors.azulTitulos} />
+                <Text style={styles.quickActionText}>Ver 12 Recintos</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickActionBtn}
+                onPress={() => router.push('/provincial/mapa')}
+                activeOpacity={0.8}
+              >
+                <MapPin size={16} color={BrandColors.azulTitulos} />
+                <Text style={styles.quickActionText}>Mapa Territorial</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Coordinación Provincial: Lista y Botón de Invitar */}
+            <View style={styles.sectionHeaderCard}>
+              <View style={styles.sectionActionBar}>
+                <View style={styles.sectionActionTextGroup}>
+                  <Text style={styles.sectionActionTitle}>Coordinación de Recintos</Text>
+                  <Text style={styles.sectionActionSubtitle}>
+                    {coordinadores.length} coordinador{coordinadores.length !== 1 ? 'es' : ''} registrado{coordinadores.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.inviteButton}
+                  onPress={() => router.push('/provincial/invitar-coordinador')}
+                  activeOpacity={0.8}
+                >
+                  <UserPlus size={14} color={BrandColors.blancoSuperficie} />
+                  <Text style={styles.inviteButtonText}>Invitar coordinador</Text>
+                </TouchableOpacity>
+              </View>
+
+              {coordinadores.slice(0, 4).map((coord) => (
+                <TouchableOpacity
+                  key={coord.id}
+                  style={styles.itemCard}
+                  onPress={() => setCoordinadorDetalle(coord)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.coordHeader}>
+                    <View style={styles.coordAvatar}>
+                      <Text style={styles.coordAvatarText}>
+                        {coord.nombres.charAt(0)}
+                        {coord.apellidos.charAt(0)}
+                      </Text>
+                    </View>
+                    <View style={styles.coordInfo}>
+                      <Text style={styles.itemTitle}>
+                        {coord.nombres} {coord.apellidos}
+                      </Text>
+                      <Text style={styles.coordRecinto}>
+                        {coord.recintoNombre ?? 'Sin recinto asignado'}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.chipStatus,
+                        coord.habilitado ? styles.chipStatusActive : styles.chipStatusInactive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.chipStatusText,
+                          coord.habilitado ? styles.chipStatusTextActive : styles.chipStatusTextInactive,
+                        ]}
+                      >
+                        {coord.habilitado ? 'Habilitado' : 'Inactivo'}
+                      </Text>
+                    </View>
+                    <ChevronRight size={15} color={BrandColors.textoMuted} style={styles.itemChevron} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Resumen de Últimas Actas */}
+            {actas.length > 0 && (
+              <View style={styles.sectionHeaderCard}>
+                <Text style={styles.sectionActionTitle}>Últimas Actas Recibidas</Text>
+                <Text style={styles.sectionActionSubtitle}>
+                  Transmisión y recepción en tiempo real
+                </Text>
+                {actas.slice(0, 3).map((acta) => (
+                  <View key={acta.id} style={styles.itemCard}>
+                    <View style={styles.actaHeader}>
+                      <View style={styles.actaDignidadBadge}>
+                        <Text style={styles.actaDignidadText}>
+                          {acta.dignidadCodigo === 'ALCALDIA' ? 'Alcaldía de Quito' : 'Prefectura Pichincha'}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.actaEvidenciaBadge,
+                          acta.tieneEvidencia ? styles.actaEvidenciaBadgeSuccess : styles.actaEvidenciaBadgeDraft,
+                        ]}
+                      >
+                        <Text
                           style={[
-                            styles.chipStatus,
-                            coord.habilitado
-                              ? styles.chipStatusActive
-                              : styles.chipStatusInactive,
+                            styles.actaEvidenciaText,
+                            acta.tieneEvidencia ? styles.actaEvidenciaTextSuccess : styles.actaEvidenciaTextDraft,
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.chipStatusText,
-                              coord.habilitado
-                                ? styles.chipStatusTextActive
-                                : styles.chipStatusTextInactive,
-                            ]}
-                          >
-                            {coord.habilitado ? 'Habilitado' : 'Inactivo'}
-                          </Text>
-                        </View>
+                          {acta.tieneEvidencia ? 'Evidencia confirmada' : 'Borrador'}
+                        </Text>
                       </View>
                     </View>
-                  ))
-                )}
-              </>
-            )}
-
-            {/* TAB: ACTAS */}
-            {activeTab === 'actas' && (
-              <>
-                {actasFiltradas.length === 0 ? (
-                  <View style={styles.emptyCard}>
-                    <FileText size={28} color={BrandColors.grisAzulado} />
-                    <Text style={styles.emptyTitle}>
-                      {busqueda ? 'Sin actas que coincidan' : 'Sin actas registradas'}
-                    </Text>
-                    <Text style={styles.emptyDescription}>
-                      {busqueda
-                        ? `No se encontraron actas con el filtro "${busqueda}".`
-                        : 'Aún no se han recibido borradores de actas en los recintos provinciales.'}
-                    </Text>
+                    <View style={styles.actaBody}>
+                      <Text style={styles.itemTitle}>{acta.recintoNombre}</Text>
+                      <Text style={styles.actaMesaText}>
+                        Junta Receptora #{String(acta.mesaNumero).padStart(3, '0')}
+                      </Text>
+                    </View>
                   </View>
-                ) : (
-                  actasFiltradas.map((acta) => (
-                    <View key={acta.id} style={styles.itemCard}>
-                      <View style={styles.actaHeader}>
-                        <View style={styles.actaDignidadBadge}>
-                          <Text style={styles.actaDignidadText}>
-                            {acta.dignidadCodigo === 'ALCALDIA'
-                              ? 'Alcaldía de Quito'
-                              : 'Prefectura Pichincha'}
+                ))}
+              </View>
+            )}
+          </>
+        )}
+
+        {/* 2. SECCIÓN: RECINTOS */}
+        {activeSection === 'recintos' && (
+          <>
+            <View style={styles.sectionHeroHeader}>
+              <Text style={styles.sectionHeroOverline}>CATÁLOGO ELECTORAL · DMQ</Text>
+              <Text style={styles.sectionHeroTitle}>Recintos Electorales</Text>
+              <Text style={styles.sectionHeroSubtitle}>
+                {recintosFiltrados.length} recintos oficiales en el Distrito Metropolitano de Quito
+              </Text>
+            </View>
+
+            {/* Buscador con limpieza instantánea */}
+            <CampoBusqueda
+              valor={busqueda}
+              alCambiar={setBusqueda}
+              placeholder="Buscar por recinto, parroquia o código…"
+              style={styles.searchBarWrapper}
+            />
+
+            {loading && recintos.length === 0 ? (
+              <View style={styles.centerContainer}>
+                <ActivityIndicator size="small" color={BrandColors.azulTitulos} />
+                <Text style={styles.loadingText}>Cargando catálogo electoral…</Text>
+              </View>
+            ) : recintosFiltrados.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Building2 size={28} color={BrandColors.grisAzulado} />
+                <Text style={styles.emptyTitle}>
+                  {busqueda ? 'No hay recintos que coincidan' : 'No hay recintos registrados'}
+                </Text>
+                <Text style={styles.emptyDescription}>
+                  {busqueda
+                    ? `No se encontraron resultados para "${busqueda}".`
+                    : 'El catálogo provincial no cuenta con recintos cargados actualmente.'}
+                </Text>
+              </View>
+            ) : (
+              recintosFiltrados.map((recinto) => (
+                <TouchableOpacity
+                  key={recinto.codigo}
+                  style={styles.itemCard}
+                  onPress={() => setRecintoDetalleCodigo(recinto.codigo)}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`Ver detalle de recinto ${recinto.nombre}`}
+                >
+                  <View style={styles.itemHeader}>
+                    <View style={styles.itemTitleGroup}>
+                      <Text style={styles.itemTitle}>{recinto.nombre}</Text>
+                      <View style={styles.itemBadgeRow}>
+                        <View style={styles.chipParroquia}>
+                          <MapPin size={10} color={BrandColors.azulTitulos} />
+                          <Text style={styles.chipParroquiaText}>
+                            {recinto.parroquiaNombre ?? recinto.parroquiaCodigo}
                           </Text>
                         </View>
-                        <View
-                          style={[
-                            styles.actaEvidenciaBadge,
-                            acta.tieneEvidencia
-                              ? styles.actaEvidenciaBadgeSuccess
-                              : styles.actaEvidenciaBadgeDraft,
-                          ]}
-                        >
-                          <Text
+                        {recinto.parroquiaTipo ? (
+                          <View
                             style={[
-                              styles.actaEvidenciaText,
-                              acta.tieneEvidencia
-                                ? styles.actaEvidenciaTextSuccess
-                                : styles.actaEvidenciaTextDraft,
+                              styles.chipTipo,
+                              recinto.parroquiaTipo === 'urbana'
+                                ? styles.chipTipoUrbana
+                                : styles.chipTipoRural,
                             ]}
                           >
-                            {acta.tieneEvidencia ? 'Evidencia confirmada' : 'Borrador'}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.actaBody}>
-                        <Text style={styles.itemTitle}>{acta.recintoNombre}</Text>
-                        <Text style={styles.actaMesaText}>
-                          Junta Receptora del Voto #{String(acta.mesaNumero).padStart(3, '0')}
-                        </Text>
-
-                        <View style={styles.actaMetaRow}>
-                          <View style={styles.actaMetaItem}>
-                            <Clock size={12} color={BrandColors.textoSecundario} />
-                            <Text style={styles.actaMetaText}>
-                              {new Date(acta.creadaEn).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
+                            <Text
+                              style={[
+                                styles.chipTipoText,
+                                recinto.parroquiaTipo === 'urbana'
+                                  ? styles.chipTipoTextUrbana
+                                  : styles.chipTipoTextRural,
+                              ]}
+                            >
+                              {recinto.parroquiaTipo === 'urbana' ? 'Urbana' : 'Rural'}
                             </Text>
                           </View>
-                          {acta.autorNombre ? (
-                            <View style={styles.actaMetaItem}>
-                              <Shield size={12} color={BrandColors.azulPrincipal} />
-                              <Text style={styles.actaMetaText}>{acta.autorNombre}</Text>
-                            </View>
-                          ) : null}
-                        </View>
+                        ) : null}
+                        <Text style={styles.chipCodeText}>Cód: {recinto.codigo}</Text>
                       </View>
                     </View>
-                  ))
-                )}
-              </>
+                    <View style={styles.mesaCountBadge}>
+                      <Text style={styles.mesaCountNumber}>{recinto.totalMesas}</Text>
+                      <Text style={styles.mesaCountLabel}>Mesas</Text>
+                    </View>
+                    <ChevronRight size={15} color={BrandColors.textoMuted} style={styles.itemChevron} />
+                  </View>
+                </TouchableOpacity>
+              ))
             )}
-          </View>
+          </>
+        )}
+
+        {/* 3. SECCIÓN: RESULTADOS */}
+        {activeSection === 'resultados' && (() => {
+          const resultadosTotales = seguimiento.datos?.resultados?.filter((r) => r.recinto_codigo === null) ?? [];
+          const hayResultadosConfirmados = resultadosTotales.some((r) => r.actas_confirmadas > 0);
+
+          return (
+            <>
+              <View style={styles.sectionHeroHeader}>
+                <Text style={styles.sectionHeroOverline}>ESCRUTINIO PRELIMINAR</Text>
+                <Text style={styles.sectionHeroTitle}>Resultados Electorales</Text>
+                <Text style={styles.sectionHeroSubtitle}>
+                  Consolidación oficial de actas escrutadas para el Cantón Quito y Pichincha
+                </Text>
+              </View>
+
+              {hayResultadosConfirmados ? (
+                resultadosTotales.map((res) => (
+                  <View key={res.dignidad_codigo} style={[styles.itemCard, { marginBottom: Spacing.sm }]}>
+                    <View style={styles.actaHeader}>
+                      <Text style={styles.itemTitle}>
+                        {res.dignidad_codigo === 'ALCALDIA' ? 'Alcaldía de Quito' : 'Prefectura de Pichincha'}
+                      </Text>
+                      <Text style={styles.chipCodeText}>{res.actas_confirmadas} actas confirmadas</Text>
+                    </View>
+                    <View style={{ gap: 8, marginTop: 8 }}>
+                      {res.candidaturas.map((cand) => (
+                        <View key={cand.sigla}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                            <Text style={{ fontFamily: FontFamilies.bodyBold, fontSize: 12, color: BrandColors.azulTitulos }}>
+                              {cand.sigla} · {cand.candidato}
+                            </Text>
+                            <Text style={{ fontFamily: FontFamilies.titleBold, fontSize: 12, color: BrandColors.azulTitulos }}>
+                              {cand.porcentaje_votos_validos !== null ? `${cand.porcentaje_votos_validos}%` : '—'} ({cand.votos} votos)
+                            </Text>
+                          </View>
+                          <View style={{ height: 6, backgroundColor: BrandColors.superficieCalida, borderRadius: 3, overflow: 'hidden' }}>
+                            <View
+                              style={{
+                                height: '100%',
+                                width: `${cand.porcentaje_votos_validos ?? 0}%`,
+                                backgroundColor: cand.color || BrandColors.azulPrincipal,
+                                borderRadius: 3,
+                              }}
+                            />
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 6, borderTopWidth: 1, borderTopColor: BrandColors.azulSuperficie }}>
+                      <Text style={styles.actaMetaText}>Blancos: {res.blancos}</Text>
+                      <Text style={styles.actaMetaText}>Nulos: {res.nulos}</Text>
+                      <Text style={styles.actaMetaText}>Válidos: {res.votos_validos}</Text>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <>
+                  {/* Tarjeta Oficial de Estado */}
+                  <View style={styles.infoStateCard}>
+                    <View style={styles.infoStateBadge}>
+                      <Clock size={12} color="#D97706" />
+                      <Text style={styles.infoStateBadgeText}>EN ESPERA DE CIERRE DE URNAS (17:00)</Text>
+                    </View>
+                    <Text style={styles.infoStateTitle}>Cómputo Programado post-escrutinio</Text>
+                    <Text style={styles.infoStateDesc}>
+                      El cálculo y consolidación de resultados preliminares para Alcaldía de Quito y Prefectura de Pichincha se activará automáticamente con la transmisión de las primeras actas oficiales firmadas por las Juntas Receptoras.
+                    </Text>
+                  </View>
+
+                  {/* Documentación de Dependencia Backend (Regla 6) */}
+                  <View style={styles.dependencyCard}>
+                    <View style={styles.dependencyTopRow}>
+                      <ShieldCheck size={18} color={BrandColors.azulPrincipal} />
+                      <Text style={styles.dependencyTitle}>Servicio Backend de Consolidación (ADR-01 / Fase 8)</Text>
+                    </View>
+                    <Text style={styles.dependencyDesc}>
+                      Conforme a los ADR-01 y las políticas de seguridad RLS en PostgreSQL, las cifras de votación residen en tablas inmutables (<Text style={styles.codeText}>actas_revisiones</Text>). La agregación preliminar por candidato se habilitará mediante el servicio RPC consolidado del backend que procesa únicamente actas con evidencias confirmadas.
+                    </Text>
+                  </View>
+
+                  {/* Estadísticas Reales de Recepción */}
+                  <View style={styles.statsOverviewCard}>
+                    <Text style={styles.statsCardTitle}>Estado de Preparación de Evidencias</Text>
+                    <View style={styles.statsRow}>
+                      <View style={styles.statBox}>
+                        <Text style={styles.statBoxNum}>{resumen?.evidenciasConfirmadas ?? 0}</Text>
+                        <Text style={styles.statBoxLabel}>Actas con Evidencia</Text>
+                      </View>
+                      <View style={styles.statBox}>
+                        <Text style={styles.statBoxNum}>{(resumen?.totalMesas ?? 36) * 2}</Text>
+                        <Text style={styles.statBoxLabel}>Actas Totales (72)</Text>
+                      </View>
+                      <View style={styles.statBox}>
+                        <Text style={styles.statBoxNum}>{resumen?.totalRecintos ?? 12}</Text>
+                        <Text style={styles.statBoxLabel}>Recintos en Cobertura</Text>
+                      </View>
+                    </View>
+                  </View>
+                </>
+              )}
+            </>
+          );
+        })()}
+
+        {/* 4. SECCIÓN: MAPA */}
+        {activeSection === 'mapa' && (
+          <>
+            <View style={styles.sectionHeroHeader}>
+              <Text style={styles.sectionHeroOverline}>GEORREFERENCIACIÓN Y COBERTURA (ADR-04)</Text>
+              <Text style={styles.sectionHeroTitle}>Visualización Territorial</Text>
+              <Text style={styles.sectionHeroSubtitle}>
+                Monitoreo perimetral de los recintos electorales del Distrito Metropolitano de Quito
+              </Text>
+            </View>
+
+            {/* Tarjeta de Especificación ADR-04 */}
+            <View style={styles.dependencyCard}>
+              <View style={styles.dependencyTopRow}>
+                <MapPin size={18} color={BrandColors.azulPrincipal} />
+                <Text style={styles.dependencyTitle}>Visualización Cartográfica Leaflet (ADR-04)</Text>
+              </View>
+              <Text style={styles.dependencyDesc}>
+                Conforme a la decisión de arquitectura ADR-04, la visualización cartográfica interactiva está diseñada con Leaflet y teselas libres de OpenStreetMap en un contenedor WebView nativo, garantizando monitoreo territorial sin costos de API propietarias.
+              </Text>
+            </View>
+
+            {/* Cobertura Territorial de los 12 Recintos */}
+            <View style={styles.sectionHeaderCard}>
+              <View style={styles.mapHeaderRow}>
+                <Text style={styles.sectionActionTitle}>Recintos Electorales Georreferenciados</Text>
+                <View style={styles.geocercaBadge}>
+                  <Text style={styles.geocercaBadgeText}>RADIO 200M</Text>
+                </View>
+              </View>
+              <Text style={styles.sectionActionSubtitle}>
+                Coordenadas GPS oficiales y asignación de mesas JRV
+              </Text>
+
+              {recintos.map((recinto) => (
+                <TouchableOpacity
+                  key={recinto.codigo}
+                  style={styles.itemCard}
+                  onPress={() => setRecintoDetalleCodigo(recinto.codigo)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.itemHeader}>
+                    <View style={styles.itemTitleGroup}>
+                      <Text style={styles.itemTitle}>{recinto.nombre}</Text>
+                      <View style={styles.itemBadgeRow}>
+                        <View style={styles.chipParroquia}>
+                          <MapPin size={10} color={BrandColors.azulTitulos} />
+                          <Text style={styles.chipParroquiaText}>
+                            GPS: {recinto.latitud.toFixed(4)}, {recinto.longitud.toFixed(4)}
+                          </Text>
+                        </View>
+                        <Text style={styles.chipCodeText}>Cód: {recinto.codigo}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.mesaCountBadge}>
+                      <Text style={styles.mesaCountNumber}>{recinto.totalMesas}</Text>
+                      <Text style={styles.mesaCountLabel}>Mesas</Text>
+                    </View>
+                    <ChevronRight size={15} color={BrandColors.textoMuted} style={styles.itemChevron} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         )}
       </ScrollView>
+
+      {/* Modal de Detalle de Recinto */}
+      <DetalleRecintoModal
+        visible={Boolean(recintoDetalleCodigo)}
+        recintoCodigo={recintoDetalleCodigo}
+        onClose={() => setRecintoDetalleCodigo(null)}
+      />
+
+      {/* Modal de Detalle de Coordinador */}
+      <DetalleCoordinadorModal
+        visible={Boolean(coordinadorDetalle)}
+        coordinador={coordinadorDetalle}
+        recintosDisponibles={recintos}
+        onClose={() => setCoordinadorDetalle(null)}
+        onAsignacionExitosa={() => {
+          void cargarDatos();
+        }}
+      />
     </SafeAreaView>
   );
 };
@@ -674,26 +865,35 @@ const styles = StyleSheet.create({
     color: BrandColors.azulTitulos,
     fontFamily: FontFamilies.titleBold,
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: BrandColors.blancoSuperficie,
-    borderRadius: Radii.md,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: BrandColors.azulBorde,
+  searchBarWrapper: {
     marginBottom: Spacing.md,
-    height: 42,
   },
-  searchIcon: {
-    marginRight: Spacing.xs,
+  chipTipo: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: Radii.xs,
+    borderWidth: 1,
   },
-  searchInput: {
-    flex: 1,
-    fontFamily: FontFamilies.bodyRegular,
-    fontSize: 13,
-    color: BrandColors.textoPrincipal,
-    height: '100%',
+  chipTipoUrbana: {
+    backgroundColor: BrandColors.superficieCalida,
+    borderColor: BrandColors.grisAzuladoLight,
+  },
+  chipTipoRural: {
+    backgroundColor: '#F3EFE6',
+    borderColor: '#D4CBBF',
+  },
+  chipTipoText: {
+    fontFamily: FontFamilies.bodyBold,
+    fontSize: 9.5,
+  },
+  chipTipoTextUrbana: {
+    color: BrandColors.azulPrincipal,
+  },
+  chipTipoTextRural: {
+    color: '#6E5D4B',
+  },
+  itemChevron: {
+    marginLeft: 4,
   },
   centerContainer: {
     alignItems: 'center',
@@ -961,5 +1161,243 @@ const styles = StyleSheet.create({
     fontFamily: FontFamilies.titleBold,
     fontSize: 11.5,
     color: BrandColors.blancoSuperficie,
+  },
+  escrutinioCard: {
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: Spacing.sm,
+    ...Elevations.subtle,
+  },
+  escrutinioTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  escrutinioIconBox: {
+    width: 30,
+    height: 30,
+    borderRadius: Radii.sm,
+    backgroundColor: BrandColors.azulSuperficie,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  escrutinioInfo: {
+    flex: 1,
+  },
+  escrutinioOverline: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 9.5,
+    letterSpacing: 0.8,
+    color: BrandColors.azulPrincipal,
+  },
+  escrutinioTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 13.5,
+    color: BrandColors.azulTitulos,
+    marginTop: 1,
+  },
+  escrutinioBadge: {
+    backgroundColor: BrandColors.azulSuperficie,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+  },
+  escrutinioBadgeText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 12,
+    color: BrandColors.azulTitulos,
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: BrandColors.superficieCalida,
+    borderRadius: Radii.full,
+    overflow: 'hidden',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: BrandColors.verdeExito,
+    borderRadius: Radii.full,
+  },
+  escrutinioFooter: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 11,
+    color: BrandColors.textoSecundario,
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: Spacing.sm,
+  },
+  quickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: BrandColors.blancoSuperficie,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    ...Elevations.subtle,
+  },
+  quickActionText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 12,
+    color: BrandColors.azulTitulos,
+  },
+  sectionHeaderCard: {
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  sectionHeroHeader: {
+    marginBottom: Spacing.sm,
+  },
+  sectionHeroOverline: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: BrandColors.azulPrincipal,
+  },
+  sectionHeroTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 18,
+    color: BrandColors.azulTitulos,
+    marginTop: 2,
+  },
+  sectionHeroSubtitle: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 12,
+    color: BrandColors.textoSecundario,
+    marginTop: 2,
+  },
+  infoStateCard: {
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: Spacing.sm,
+    ...Elevations.subtle,
+  },
+  infoStateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.sm,
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+  infoStateBadgeText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 10,
+    color: '#B45309',
+  },
+  infoStateTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 14,
+    color: BrandColors.azulTitulos,
+    marginBottom: 4,
+  },
+  infoStateDesc: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 11.5,
+    color: BrandColors.textoSecundario,
+    lineHeight: 17,
+  },
+  dependencyCard: {
+    backgroundColor: BrandColors.azulSuperficie,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: Spacing.sm,
+  },
+  dependencyTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  dependencyTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 12.5,
+    color: BrandColors.azulTitulos,
+  },
+  dependencyDesc: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 11,
+    color: BrandColors.textoSecundario,
+    lineHeight: 16,
+  },
+  codeText: {
+    fontFamily: FontFamilies.bodyBold,
+    color: BrandColors.azulTitulos,
+  },
+  statsOverviewCard: {
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: Spacing.sm,
+    ...Elevations.subtle,
+  },
+  statsCardTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 13,
+    color: BrandColors.azulTitulos,
+    marginBottom: 10,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: BrandColors.superficieCalida,
+    padding: 10,
+    borderRadius: Radii.md,
+    alignItems: 'center',
+  },
+  statBoxNum: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 16,
+    color: BrandColors.azulTitulos,
+  },
+  statBoxLabel: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 9.5,
+    color: BrandColors.textoSecundario,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  mapHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  geocercaBadge: {
+    backgroundColor: BrandColors.verdeExitoLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.sm,
+  },
+  geocercaBadgeText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 9.5,
+    color: BrandColors.verdeExito,
   },
 });

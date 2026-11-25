@@ -1,4 +1,1 @@
-/**
- * Componentes de UI para recintos electorales.
- */
-export {};
+export * from './DetalleRecintoModal';

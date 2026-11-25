@@ -10,3 +10,5 @@ export * from './quito-pattern';
 export * from './quito-skyline-illustration';
 export * from './floating-bottom-bar';
 export * from './institutional-header';
+export * from './campo-busqueda';
+export * from './editorial-bottom-nav';

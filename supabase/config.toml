@@ -20,3 +20,7 @@ verify_jwt = true
 entrypoint = "./functions/enviar-evidencia-acta/index.mjs"
 # La función valida el JWT y reenvía la identidad a la RPC que controla el alcance.
 verify_jwt = true
+
+[functions.descargar-evidencia-acta]
+entrypoint = "./functions/descargar-evidencia-acta/index.mjs"
+verify_jwt = true

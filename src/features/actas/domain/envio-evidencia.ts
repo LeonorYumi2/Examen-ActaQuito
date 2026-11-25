@@ -9,11 +9,11 @@ export type EnvioEvidencia = {
 };
 
 export interface RepositorioEnvioEvidencia {
-  enviar(entrada: EnvioEvidencia): Promise<{ acta: string; operacion: string; confirmada: true }>;
+  enviar(entrada: EnvioEvidencia, token?: string): Promise<{ acta: string; operacion: string; confirmada: true }>;
 }
 
 export class ErrorEnvioEvidencia extends Error {
-  constructor(readonly status: number | undefined, readonly codigo: string, mensaje: string) {
+  constructor(readonly status: number | undefined, readonly codigo: string, mensaje: string, readonly reintentarEnMs?: number) {
     super(mensaje);
   }
 }

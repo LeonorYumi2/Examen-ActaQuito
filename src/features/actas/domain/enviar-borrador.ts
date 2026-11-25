@@ -1,3 +1,4 @@
+import type { ControlEnvio } from './sincronizacion';
 import type { BorradorLocal, BorradoresLocales, FotoActa, UbicacionActa } from './evidencia';
 import { ErrorEnvioEvidencia, type RepositorioEnvioEvidencia } from './envio-evidencia';
 import { esquemaActa, leerCifras, type Cifras, type Dignidad, type Mesa, type RepositorioActas } from './registro';
@@ -13,6 +14,7 @@ export type EnvioGuardado = {
   foto: FotoActa;
   ubicacion: UbicacionActa;
   revision?: number;
+  control?: ControlEnvio;
   confirmacion?: Confirmacion;
 };
 
@@ -27,7 +29,7 @@ type Puertos = {
   actas: Pick<RepositorioActas, 'guardar'>;
   evidencia: RepositorioEnvioEvidencia;
   uuid(): string;
-  validarSesion(usuario: string): Promise<void>;
+  validarSesion(usuario: string): Promise<string | void>;
 };
 
 export function claveEnvio({ usuario, mesa, dignidad }: ReferenciaBorrador) {
@@ -57,39 +59,53 @@ function preparar(borrador: BorradorLocal | null, siglas: string[], uuid: () => 
 
 export function crearEnvioBorrador(puertos: Puertos) {
   const enCurso = new Map<string, Promise<Confirmacion>>();
+  const preparando = new Map<string, Promise<EnvioGuardado>>();
+
+  function encolar(referencia: ReferenciaBorrador, siglas: string[]) {
+    const clave = claveEnvio(referencia);
+    const previo = preparando.get(clave);
+    if (previo) return previo;
+    const nueva = (async () => {
+      const guardado = await puertos.envios.cargar(referencia);
+      if (guardado) return guardado;
+      const { usuario, mesa, dignidad } = referencia;
+      const envio = preparar(await puertos.borradores.cargar(usuario, mesa, dignidad), siglas, puertos.uuid);
+      await puertos.envios.guardar(referencia, envio);
+      return envio;
+    })().finally(() => { preparando.delete(clave); });
+    preparando.set(clave, nueva);
+    return nueva;
+  }
 
   async function ejecutar(referencia: ReferenciaBorrador, siglas: string[]) {
     const { usuario, mesa, dignidad } = referencia;
     await puertos.validarSesion(usuario);
-    let envio = await puertos.envios.cargar(referencia);
-    if (envio?.confirmacion) return envio.confirmacion;
-    if (!envio) {
-      envio = preparar(await puertos.borradores.cargar(usuario, mesa, dignidad), siglas, puertos.uuid);
-      await puertos.envios.guardar(referencia, envio);
-    }
+    let envio = await encolar(referencia, siglas);
+    if (envio.confirmacion) return envio.confirmacion;
     let revision = envio.revision;
     if (revision === undefined) {
-      await puertos.validarSesion(usuario);
+      const token = await puertos.validarSesion(usuario);
       revision = await puertos.actas.guardar({
         id: envio.acta, operacion: envio.operacionCifras, mesa, dignidad, cifras: envio.cifras,
-      });
+      }, token || undefined);
       envio = { ...envio, revision };
       await puertos.envios.guardar(referencia, envio);
     }
-    await puertos.validarSesion(usuario);
+    const token = await puertos.validarSesion(usuario);
     const confirmacion = await puertos.evidencia.enviar({
       acta: envio.acta, revision, operacion: envio.operacionEvidencia, foto: envio.foto, ubicacion: envio.ubicacion,
-    });
+    }, token || undefined);
     await puertos.envios.guardar(referencia, { ...envio, confirmacion });
     return confirmacion;
   }
 
-  return (referencia: ReferenciaBorrador, siglas: string[]) => {
+  function enviar(referencia: ReferenciaBorrador, siglas: string[]) {
     const clave = claveEnvio(referencia);
     const anterior = enCurso.get(clave);
     if (anterior) return anterior;
     const intento = ejecutar(referencia, siglas).finally(() => { enCurso.delete(clave); });
     enCurso.set(clave, intento);
     return intento;
-  };
+  }
+  return Object.assign(enviar, { encolar });
 }

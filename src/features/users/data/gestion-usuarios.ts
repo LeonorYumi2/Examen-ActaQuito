@@ -39,11 +39,11 @@ export function invitarVeedor(identidad: IdentidadInvitacion, recinto: string) {
 }
 
 function resultadoAsignacion(data: unknown, error: { code: string; message: string } | null) {
-  if (error?.code === '42501') throw new ErrorGestionUsuarios('permiso', 'Tu cuenta no puede modificar esta asignación.');
+  if (error?.code === '42501') throw new ErrorGestionUsuarios('permiso', error.message || 'Tu cuenta no puede modificar esta asignación.');
   if (error?.code === '22023') throw new ErrorGestionUsuarios('asignacion_invalida', error.message);
   if (error?.code === '40001') throw new ErrorGestionUsuarios('asignacion_cambio', 'Actualiza la mesa y revisa su asignación antes de continuar.');
   const id = z.uuid().safeParse(data);
-  if (error || !id.success) throw new ErrorGestionUsuarios('asignacion_pendiente', 'No se pudo confirmar la asignación. Actualiza los datos antes de reintentar.');
+  if (error || !id.success) throw new ErrorGestionUsuarios('asignacion_pendiente', error?.message || 'No se pudo confirmar la asignación. Actualiza los datos antes de reintentar.');
   return { asignacionId: id.data };
 }
 
