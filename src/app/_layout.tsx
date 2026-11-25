@@ -63,9 +63,11 @@ export default function RootLayout() {
         <Stack.Screen name="auth/reset-password" options={{ headerShown: false }} />
         <Stack.Protected guard={role === 'provincial'}>
           <Stack.Screen name="provincial" options={{ headerShown: false }} />
+          <Stack.Screen name="provincial/invitar-coordinador" options={{ headerShown: false }} />
         </Stack.Protected>
         <Stack.Protected guard={role === 'recinto'}>
           <Stack.Screen name="recinto" options={{ headerShown: false }} />
+          <Stack.Screen name="recinto/invitar-veedor" options={{ headerShown: false }} />
         </Stack.Protected>
         <Stack.Protected guard={role === 'veedor'}>
           <Stack.Screen name="veedor" options={{ headerShown: false }} />

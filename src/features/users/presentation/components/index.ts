@@ -1,4 +1,2 @@
-/**
- * Componentes de UI para gestión de usuarios.
- */
-export {};
+export * from './ConfirmarInvitacionModal';
+export * from './SelectorRecintoModal';

@@ -12,15 +12,17 @@ const codigoEdge = await readFile(new URL("../functions/invitar-usuario/index.mj
 const usuarioId = "usuario-de-prueba";
 const reserva = { id: "reserva-de-prueba", correo: "prueba@example.test", usuarioId: null };
 
-async function cargar({ metodo = "password", correoConfirmado = false, errorDeEnvio, errorDeGestion } = {}) {
+async function cargar({ metodo = "password", rol = "authenticated", existente = true, redireccion = "actaquito://auth/confirm", correoConfirmado = false, errorDeEnvio, errorDeGestion } = {}) {
   const llamadas = [];
+  let identidadCreada = existente;
   const cliente = {
     auth: {
       getUser: async () => ({ data: { user: { id: usuarioId } } }),
-      getClaims: async () => ({ data: { claims: { sub: usuarioId, amr: [{ method: metodo }] } } }),
+      getClaims: async () => ({ data: { claims: { sub: usuarioId, role: rol, amr: [{ method: metodo }] } } }),
       admin: {
         async inviteUserByEmail(correo, opciones) {
           llamadas.push({ tipo: "correo", correo, opciones });
+          if (!errorDeEnvio) identidadCreada = true;
           return { error: errorDeEnvio };
         },
       },
@@ -30,8 +32,8 @@ async function cargar({ metodo = "password", correoConfirmado = false, errorDeEn
       if (nombre === "gestionar_invitacion") {
         return { data: { ...reserva, correoConfirmado }, error: errorDeGestion };
       }
-      if (nombre === "reservar_invitacion") return { data: { ...reserva, usuarioId } };
-      if (nombre === "confirmar_invitacion") return { data: usuarioId };
+      if (nombre === "reservar_invitacion") return { data: { ...reserva, usuarioId: identidadCreada ? usuarioId : null } };
+      if (nombre === "confirmar_invitacion") return { data: identidadCreada ? usuarioId : null };
       throw new Error(`RPC inesperada: ${nombre}`);
     },
   };
@@ -39,8 +41,9 @@ async function cargar({ metodo = "password", correoConfirmado = false, errorDeEn
   const contexto = vm.createContext({
     Request,
     Response,
+    TextDecoder,
     Deno: {
-      env: { get: () => "http://localhost:54321" },
+      env: { get: (nombre) => nombre === "ACTAQUITO_AUTH_REDIRECT_URL" ? redireccion : "http://localhost:54321" },
       serve: (handler) => { manejar = handler; },
     },
   });
@@ -108,4 +111,28 @@ test("cancelar conserva una reserva vinculada y no llama al correo", async () =>
   const { gestionar, llamadas } = await cargar({ errorDeGestion: { code: "23505" } });
   await assert.rejects(() => gestionar("cancelar"), { status: 409 });
   assert.deepEqual(llamadas.map(({ tipo }) => tipo), ["gestionar_invitacion"]);
+});
+test("el endpoint rechaza un rol JWT incorrecto y un cuerpo demasiado grande", async () => {
+  const otroRol = await cargar({ rol: "service_role" });
+  assert.equal((await otroRol.manejar(solicitud())).status, 401);
+  assert.equal(otroRol.llamadas.length, 0);
+  const { manejar, llamadas } = await cargar();
+  assert.equal((await manejar(solicitud({ nombres: "a".repeat(5000) }))).status, 413);
+  assert.equal(llamadas.length, 0);
+});
+
+test("reserva, envía por Auth y confirma; el reintento conserva la identidad sin otro correo", async () => {
+  const { manejar, llamadas } = await cargar({ existente: false });
+  assert.equal((await manejar(solicitud())).status, 200);
+  assert.equal((await manejar(solicitud())).status, 200);
+  assert.deepEqual(llamadas.map(({ tipo }) => tipo), [
+    "reservar_invitacion", "confirmar_invitacion", "correo", "confirmar_invitacion", "reservar_invitacion",
+  ]);
+  assert.equal(llamadas[2].opciones.data.actaquito_invitacion, reserva.id);
+});
+
+test("una redirección no aprobada detiene el alta antes de reservar o enviar", async () => {
+  const { manejar, llamadas } = await cargar({ redireccion: "https://example.test/confirm" });
+  assert.equal((await manejar(solicitud())).status, 503);
+  assert.equal(llamadas.length, 0);
 });

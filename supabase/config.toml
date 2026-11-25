@@ -14,9 +14,9 @@ enable_confirmations = true
 [functions.invitar-usuario]
 entrypoint = "./functions/invitar-usuario/index.mjs"
 # El endpoint valida el token con Supabase Auth antes de procesar el cuerpo.
-verify_jwt = false
+verify_jwt = true
 
 [functions.enviar-evidencia-acta]
 entrypoint = "./functions/enviar-evidencia-acta/index.mjs"
 # La función valida el JWT y reenvía la identidad a la RPC que controla el alcance.
-verify_jwt = false
+verify_jwt = true

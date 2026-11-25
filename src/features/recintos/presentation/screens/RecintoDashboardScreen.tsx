@@ -16,6 +16,7 @@ import {
   Building2,
   Vote,
   Users,
+  UserPlus,
   FileText,
   MapPin,
   Clock,
@@ -314,6 +315,27 @@ export const RecintoDashboardScreen: React.FC = () => {
                 {/* TAB: VEEDORES */}
                 {activeTab === 'veedores' && (
                   <>
+                    {/* Botón de Acción Principal: Invitar Veedor */}
+                    <View style={styles.sectionActionBar}>
+                      <View style={styles.sectionActionTextGroup}>
+                        <Text style={styles.sectionActionTitle}>Veeduría del Recinto</Text>
+                        <Text style={styles.sectionActionSubtitle}>
+                          {veedores.length} veedor{veedores.length !== 1 ? 'es' : ''} registrado{veedores.length !== 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.inviteButton, !recinto && styles.inviteButtonDisabled]}
+                        onPress={() => {
+                          if (recinto) router.push('/recinto/invitar-veedor');
+                        }}
+                        disabled={!recinto}
+                        activeOpacity={0.8}
+                      >
+                        <UserPlus size={14} color={BrandColors.blancoSuperficie} />
+                        <Text style={styles.inviteButtonText}>Invitar veedor</Text>
+                      </TouchableOpacity>
+                    </View>
+
                     {veedores.length === 0 ? (
                       <View style={styles.emptyState}>
                         <Users size={28} color={BrandColors.grisAzulado} />
@@ -873,5 +895,51 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     color: BrandColors.textoSecundario,
     textAlign: 'center',
+  },
+  sectionActionBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.md,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: 6,
+    ...Elevations.subtle,
+  },
+  sectionActionTextGroup: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  sectionActionTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 13,
+    color: BrandColors.azulTitulos,
+  },
+  sectionActionSubtitle: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 10.5,
+    color: BrandColors.textoSecundario,
+    marginTop: 1,
+  },
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: BrandColors.azulTitulos,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radii.sm,
+    ...Elevations.subtle,
+  },
+  inviteButtonDisabled: {
+    opacity: 0.5,
+  },
+  inviteButtonText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 11.5,
+    color: BrandColors.blancoSuperficie,
   },
 });

@@ -27,7 +27,7 @@ el JPEG y sus dimensiones. Haversine no acredita el origen físico del GPS.
 1. Aplicar completa la migración 00500 en SQL Editor. Las fases 00100–00400
    ya se aplicaron y no se vuelven a ejecutar.
 2. Desde la raíz, ejecutar:
-   supabase functions deploy enviar-evidencia-acta --project-ref <REF> --no-verify-jwt
+   supabase functions deploy enviar-evidencia-acta --project-ref <REF>
    La función valida internamente el JWT con Supabase Auth antes de leer el cuerpo.
 3. Comprobar SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY en el
    entorno de la función. Supabase los proporciona por defecto en el entorno

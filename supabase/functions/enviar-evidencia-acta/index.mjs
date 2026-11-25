@@ -31,9 +31,9 @@ function conectar() {
       const { data, error } = await publico.auth.getUser(token);
       if (error && (error.status ?? 500) >= 500) throw error;
       if (!data.user || error) return false;
-      const validacion = await publico.auth.getClaims(token);
-      const claims = validacion.data?.claims;
-      return !validacion.error && claims?.role === "authenticated" && claims.sub === data.user.id
+      const validacion = await publico.auth.getClaims(token).catch(() => null);
+      const claims = validacion?.data?.claims;
+      return validacion !== null && !validacion.error && claims?.role === "authenticated" && claims.sub === data.user.id
         && Array.isArray(claims.amr) && claims.amr.some((entrada) => typeof entrada === "object" && entrada?.method === "password");
     },
     async reservar(token, datos) {

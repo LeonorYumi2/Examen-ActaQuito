@@ -1,4 +1,2 @@
-/**
- * Pantallas para administración y creación de usuarios.
- */
-export {};
+export * from './InvitarCoordinadorScreen';
+export * from './InvitarVeedorScreen';

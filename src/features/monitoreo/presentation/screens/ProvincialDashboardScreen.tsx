@@ -12,11 +12,12 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import {
   Building2,
   Vote,
   Users,
+  UserPlus,
   FileText,
   Search,
   CheckCircle2,
@@ -383,6 +384,24 @@ export const ProvincialDashboardScreen: React.FC = () => {
             {/* TAB: COORDINADORES */}
             {activeTab === 'coordinadores' && (
               <>
+                {/* Botón de Acción Principal: Invitar Coordinador */}
+                <View style={styles.sectionActionBar}>
+                  <View style={styles.sectionActionTextGroup}>
+                    <Text style={styles.sectionActionTitle}>Gestión de Personal</Text>
+                    <Text style={styles.sectionActionSubtitle}>
+                      {coordinadores.length} coordinador{coordinadores.length !== 1 ? 'es' : ''} registrado{coordinadores.length !== 1 ? 's' : ''}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.inviteButton}
+                    onPress={() => router.push('/provincial/invitar-coordinador')}
+                    activeOpacity={0.8}
+                  >
+                    <UserPlus size={14} color={BrandColors.blancoSuperficie} />
+                    <Text style={styles.inviteButtonText}>Invitar coordinador</Text>
+                  </TouchableOpacity>
+                </View>
+
                 {coordinadoresFiltrados.length === 0 ? (
                   <View style={styles.emptyCard}>
                     <Users size={28} color={BrandColors.grisAzulado} />
@@ -899,5 +918,48 @@ const styles = StyleSheet.create({
     color: BrandColors.textoSecundario,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  sectionActionBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.md,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    marginBottom: 6,
+    ...Elevations.subtle,
+  },
+  sectionActionTextGroup: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  sectionActionTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 13,
+    color: BrandColors.azulTitulos,
+  },
+  sectionActionSubtitle: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 10.5,
+    color: BrandColors.textoSecundario,
+    marginTop: 1,
+  },
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: BrandColors.azulTitulos,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radii.sm,
+    ...Elevations.subtle,
+  },
+  inviteButtonText: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 11.5,
+    color: BrandColors.blancoSuperficie,
   },
 });

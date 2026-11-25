@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.98.0";
 
 export class ErrorInvitacion extends Error {
   constructor(readonly status: number, message: string) {
