@@ -55,14 +55,36 @@ const html = `<!doctype html><html lang="es"><head>
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(mapa);
   let codigoAnterior;
-  function marcador(posicion, titulo, detalle, color, evento) {
+  function marcador(posicion, titulo, detalle, color, evento, textoBoton) {
     const caja = document.createElement('div');
+    caja.style.fontFamily = 'sans-serif';
+    caja.style.padding = '2px';
     const nombre = document.createElement('strong');
+    nombre.style.display = 'block';
+    nombre.style.marginBottom = '2px';
+    nombre.style.color = '#253D59';
     nombre.textContent = titulo;
     const info = document.createElement('div');
+    info.style.fontSize = '12px';
+    info.style.color = '#405C79';
     info.textContent = detalle;
     caja.append(nombre, info);
-    L.circleMarker(posicion, { color, radius: 7 }).addTo(puntos).bindPopup(caja)
+    if (textoBoton) {
+      const btn = document.createElement('button');
+      btn.textContent = textoBoton;
+      btn.style.marginTop = '6px';
+      btn.style.padding = '4px 8px';
+      btn.style.backgroundColor = '#253D59';
+      btn.style.color = '#FFFFFF';
+      btn.style.border = 'none';
+      btn.style.borderRadius = '4px';
+      btn.style.fontSize = '11px';
+      btn.style.cursor = 'pointer';
+      btn.style.width = '100%';
+      btn.onclick = () => informar(evento);
+      caja.append(btn);
+    }
+    L.circleMarker(posicion, { color, radius: 7, fillColor: color, fillOpacity: 0.85 }).addTo(puntos).bindPopup(caja)
       .on('click', () => informar(evento));
   }
   window.ActaQuitoMapa = {
@@ -75,8 +97,10 @@ const html = `<!doctype html><html lang="es"><head>
         const par = [r.latitud, r.longitud];
         centrar.push(par);
         codigos.push(r.codigo);
-        marcador(par, r.nombre, r.parroquia + ' · ' + r.mesas_reportadas + '/' + r.total_mesas + ' mesas reportadas',
-          '#405c79', { tipo: 'recinto', codigo: r.codigo });
+        L.circle(par, { radius: 200, color: '#405c79', weight: 1.5, fillOpacity: 0.12, fillColor: '#405c79' }).addTo(puntos);
+        const pendientes = r.mesas_pendientes !== undefined ? r.mesas_pendientes : Math.max(0, r.total_mesas - r.mesas_reportadas);
+        const detalle = r.parroquia + ' · ' + r.total_mesas + ' mesas totales (' + r.mesas_reportadas + ' reportadas, ' + pendientes + ' pendientes)';
+        marcador(par, r.nombre, detalle, '#253d59', { tipo: 'recinto', codigo: r.codigo }, 'Ver Ficha de Recinto');
       }
       for (const a of datos.actas) {
         marcador([a.latitud, a.longitud], a.dignidad_codigo + ' · JRV ' + String(a.mesa_numero).padStart(3, '0'),

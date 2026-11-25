@@ -1,19 +1,18 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
-  useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import {
-  BarChart3,
   Building2,
   TrendingUp,
   MapPin,
@@ -24,7 +23,7 @@ import {
   LayoutDashboard,
   LucideIcon,
 } from 'lucide-react-native';
-import { BrandColors, FontFamilies, Radii, Spacing } from '@/constants/tokens';
+import { BrandColors, FontFamilies } from '@/constants/tokens';
 
 export interface EditorialBottomTabBarProps {
   state: {
@@ -82,15 +81,15 @@ const TabItem: React.FC<TabItemProps> = ({
   onLongPress,
   tabBarIcon,
 }) => {
-  const progress = useSharedValue(isFocused ? 1 : 0);
-
-  useEffect(() => {
-    progress.value = withTiming(isFocused ? 1 : 0, { duration: 180 });
-  }, [isFocused]);
-
   const animatedPillStyle = useAnimatedStyle(() => ({
-    backgroundColor: isFocused ? BrandColors.azulPrincipal : 'transparent',
-    opacity: withTiming(isFocused ? 1 : 0.85, { duration: 150 }),
+    backgroundColor: withTiming(isFocused ? BrandColors.azulPrincipal : 'transparent', {
+      duration: 180,
+    }),
+    transform: [
+      {
+        scale: withTiming(isFocused ? 1 : 0.94, { duration: 180 }),
+      },
+    ],
   }));
 
   const activeColor = '#FFFFFF';
@@ -137,6 +136,27 @@ export const EditorialBottomTabBar: React.FC<EditorialBottomTabBarProps> = ({
   navigation,
 }) => {
   const insets = useSafeAreaInsets();
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setIsKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setIsKeyboardVisible(false)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Ocultar si el teclado está desplegado (evita colisiones con campos de texto)
+  if (isKeyboardVisible) {
+    return null;
+  }
 
   // Comprobar si la pantalla activa solicita ocultar la barra (ej: formularios, modales)
   const currentRoute = state.routes[state.index];
@@ -148,92 +168,113 @@ export const EditorialBottomTabBar: React.FC<EditorialBottomTabBarProps> = ({
     return null;
   }
 
-  // Filtrar rutas que no deben aparecer en la barra (ej: href: null)
+  // Filtrar rutas que no deben aparecer en la barra (ej: formularios, rutas secundarias)
+  const hiddenRoutes = ['invitar-coordinador', 'invitar-veedor'];
   const visibleRoutes = state.routes.filter((route) => {
+    if (hiddenRoutes.includes(route.name)) return false;
     const options = descriptors[route.key]?.options;
-    return options?.href !== null;
+    if (options?.href === null || (options as any)?.href === false) return false;
+    if ((options as any)?.tabBarItemStyle?.display === 'none') return false;
+    if ((options as any)?.tabBarButton === null) return false;
+    return true;
   });
+
+  // Separación visual inferior de aproximadamente 14–16 dp respecto al área segura / gestos
+  const bottomOffset = Math.max(insets.bottom, 10) + 14;
 
   return (
     <View
       style={[
-        styles.container,
+        styles.outerWrapper,
         {
-          paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 6 : 8),
+          bottom: bottomOffset,
         },
       ]}
+      pointerEvents="box-none"
     >
-      <View style={styles.tabsRow}>
-        {visibleRoutes.map((route) => {
-          const isFocused = state.routes[state.index].key === route.key;
-          const { options } = descriptors[route.key];
-          const rawTitle =
-            options.tabBarLabel !== undefined
-              ? String(options.tabBarLabel)
-              : options.title !== undefined
-              ? options.title
-              : route.name;
+      <View style={styles.islandCapsule}>
+        <View style={styles.tabsRow}>
+          {visibleRoutes.map((route) => {
+            const isFocused = state.routes[state.index].key === route.key;
+            const { options } = descriptors[route.key];
+            const rawTitle =
+              options.tabBarLabel !== undefined
+                ? String(options.tabBarLabel)
+                : options.title !== undefined
+                ? options.title
+                : route.name;
 
-          const title =
-            rawTitle === 'index'
-              ? 'Resumen'
-              : rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
+            const title =
+              rawTitle === 'index'
+                ? 'Resumen'
+                : rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
 
-          const onPress = () => {
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
+            const onPress = () => {
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
 
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
-            }
-          };
+              if (!isFocused && !event.defaultPrevented) {
+                navigation.navigate(route.name);
+              }
+            };
 
-          const onLongPress = () => {
-            navigation.emit({
-              type: 'tabLongPress',
-              target: route.key,
-            });
-          };
+            const onLongPress = () => {
+              navigation.emit({
+                type: 'tabLongPress',
+                target: route.key,
+              });
+            };
 
-          return (
-            <TabItem
-              key={route.key}
-              name={route.name}
-              title={title}
-              isFocused={isFocused}
-              onPress={onPress}
-              onLongPress={onLongPress}
-              tabBarIcon={options.tabBarIcon as any}
-            />
-          );
-        })}
+            return (
+              <TabItem
+                key={route.key}
+                name={route.name}
+                title={title}
+                isFocused={isFocused}
+                onPress={onPress}
+                onLongPress={onLongPress}
+                tabBarIcon={options.tabBarIcon as any}
+              />
+            );
+          })}
+        </View>
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  outerWrapper: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    pointerEvents: 'box-none',
+    zIndex: 999,
+  },
+  islandCapsule: {
+    width: '100%',
+    maxWidth: 440,
     backgroundColor: BrandColors.azulTitulos, // #253D59
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(64, 92, 121, 0.45)', // Acento sutil en #405C79
-    paddingTop: 6,
-    paddingHorizontal: Spacing.xs,
-    position: 'relative',
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(64, 92, 121, 0.55)', // Acento sutil en #405C79
+    paddingVertical: 5,
+    paddingHorizontal: 6,
     ...Platform.select({
       ios: {
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.16,
-        shadowRadius: 6,
+        shadowColor: '#0A131C',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.28,
+        shadowRadius: 10,
       },
       android: {
-        elevation: 8,
+        elevation: 6,
       },
     }),
   },
@@ -254,11 +295,11 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: Radii.md,
+    borderRadius: 22,
     gap: 3,
-    minWidth: 54,
+    minWidth: 52,
   },
   tabText: {
     fontFamily: FontFamilies.titleSemiBold,

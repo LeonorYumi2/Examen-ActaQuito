@@ -35,20 +35,26 @@ cross join lateral (
     order by ar.version desc
     limit 1
 ) r
-where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto');
+where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto')
+  and actaquito_privado.ve_recinto(a.recinto_codigo);
 
 create view public.resultados_preliminares with (security_invoker = true) as
 with ambitos as (
     select r.codigo as recinto_codigo
     from public.recintos r
     where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto')
+      and actaquito_privado.ve_recinto(r.codigo)
     union all
     select null::text
-    where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto')
+    where (select actaquito_privado.mi_rol()) = 'provincial'
 ), actas_ambito as (
     select g.recinto_codigo, a.dignidad_codigo, a.votos, a.blancos, a.nulos, a.sufragantes
     from public.actas_confirmadas_monitoreo a
-    cross join lateral (values (a.recinto_codigo), (null::text)) g(recinto_codigo)
+    cross join lateral (
+        select a.recinto_codigo
+        union all
+        select null::text where (select actaquito_privado.mi_rol()) = 'provincial'
+    ) g(recinto_codigo)
 ), totales as (
     select recinto_codigo, dignidad_codigo, count(*) as actas_confirmadas,
            sum(blancos) as blancos, sum(nulos) as nulos, sum(sufragantes) as sufragantes,
@@ -98,7 +104,8 @@ cross join lateral (
         on (rep.recinto_codigo, rep.mesa_numero) = (j.recinto_codigo, j.numero)
     where j.recinto_codigo = r.codigo
 ) m
-where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto');
+where (select actaquito_privado.mi_rol()) in ('provincial', 'recinto')
+  and actaquito_privado.ve_recinto(r.codigo);
 
 revoke all on public.actas_confirmadas_monitoreo, public.resultados_preliminares, public.mapa_recintos_electoral
     from public, anon, authenticated, service_role;

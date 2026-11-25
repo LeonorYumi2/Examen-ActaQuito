@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,12 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
+import {
+  documentoMapaElectoral,
+  actualizarMapaElectoral,
+  leerMensajeMapa,
+} from '@/features/monitoreo/data/mapa-leaflet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
 import {
@@ -65,12 +71,76 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
   const [busqueda, setBusqueda] = useState<string>('');
   const [recintoDetalleCodigo, setRecintoDetalleCodigo] = useState<string | null>(null);
   const [coordinadorDetalle, setCoordinadorDetalle] = useState<CoordinadorRecintoInfo | null>(null);
-
   const [resumen, setResumen] = useState<ResumenProvincial | null>(null);
   const [recintos, setRecintos] = useState<RecintoInfo[]>([]);
   const [coordinadores, setCoordinadores] = useState<CoordinadorRecintoInfo[]>([]);
   const [actas, setActas] = useState<ActaProvincialInfo[]>([]);
   const [error, setError] = useState<string>();
+
+  // Referencias y estado para el mapa interactivo Leaflet
+  const webViewRef = useRef<WebView>(null);
+  const mapaListoRef = useRef<boolean>(false);
+
+  const docMapa = useMemo(() => {
+    const urlBase = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://actaquito.supabase.co';
+    try {
+      return documentoMapaElectoral(urlBase);
+    } catch {
+      return documentoMapaElectoral('https://actaquito.supabase.co');
+    }
+  }, []);
+
+  // Consolidar datos reales para el mapa: prioridad a instantánea RPC de monitoreo
+  const datosMapa = useMemo(() => {
+    if (seguimiento.datos?.recintos && seguimiento.datos.recintos.length > 0) {
+      return {
+        recintos: seguimiento.datos.recintos,
+        actas: seguimiento.datos.actas ?? [],
+      };
+    }
+    // Fallback con los 12 recintos autorizados de Supabase
+    return {
+      recintos: recintos.map((r) => ({
+        codigo: r.codigo,
+        nombre: r.nombre,
+        parroquia_codigo: r.parroquiaCodigo,
+        parroquia: r.parroquiaNombre ?? 'Pichincha',
+        latitud: r.latitud,
+        longitud: r.longitud,
+        total_mesas: r.totalMesas,
+        mesas_reportadas: 0,
+        mesas_pendientes: r.totalMesas,
+        mesas: [],
+      })),
+      actas: [],
+    };
+  }, [seguimiento.datos, recintos]);
+
+  // Actualizar marcadores y geocercas en el WebView sin recrear la instancia
+  useEffect(() => {
+    if (mapaListoRef.current && activeSection === 'mapa') {
+      const script = actualizarMapaElectoral(datosMapa);
+      webViewRef.current?.injectJavaScript(script);
+    }
+  }, [datosMapa, activeSection]);
+
+  const handleMensajeMapa = (event: any) => {
+    const msg = leerMensajeMapa(event.nativeEvent.data);
+    if (!msg) return;
+
+    if (msg.tipo === 'mapa-listo') {
+      mapaListoRef.current = true;
+      const script = actualizarMapaElectoral(datosMapa);
+      webViewRef.current?.injectJavaScript(script);
+      return;
+    }
+
+    if (msg.tipo === 'recinto') {
+      // Abre la ficha completa del recinto seleccionado desde el marcador
+      setRecintoDetalleCodigo(msg.codigo);
+      return;
+    }
+  };
 
   const cargarDatos = async () => {
     try {
@@ -185,7 +255,7 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
         style={styles.container}
         contentContainerStyle={[
           styles.contentContainer,
-          { paddingHorizontal: horizontalPadding, paddingBottom: 88 },
+          { paddingHorizontal: horizontalPadding, paddingBottom: 100 },
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -644,34 +714,88 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
           );
         })()}
 
-        {/* 4. SECCIÓN: MAPA */}
+        {/* 4. SECCIÓN: MAPA ELECTORAL INTERACTIVO */}
         {activeSection === 'mapa' && (
           <>
             <View style={styles.sectionHeroHeader}>
-              <Text style={styles.sectionHeroOverline}>GEORREFERENCIACIÓN Y COBERTURA (ADR-04)</Text>
-              <Text style={styles.sectionHeroTitle}>Visualización Territorial</Text>
-              <Text style={styles.sectionHeroSubtitle}>
-                Monitoreo perimetral de los recintos electorales del Distrito Metropolitano de Quito
-              </Text>
-            </View>
-
-            {/* Tarjeta de Especificación ADR-04 */}
-            <View style={styles.dependencyCard}>
-              <View style={styles.dependencyTopRow}>
-                <MapPin size={18} color={BrandColors.azulPrincipal} />
-                <Text style={styles.dependencyTitle}>Visualización Cartográfica Leaflet (ADR-04)</Text>
-              </View>
-              <Text style={styles.dependencyDesc}>
-                Conforme a la decisión de arquitectura ADR-04, la visualización cartográfica interactiva está diseñada con Leaflet y teselas libres de OpenStreetMap en un contenedor WebView nativo, garantizando monitoreo territorial sin costos de API propietarias.
-              </Text>
-            </View>
-
-            {/* Cobertura Territorial de los 12 Recintos */}
-            <View style={styles.sectionHeaderCard}>
-              <View style={styles.mapHeaderRow}>
-                <Text style={styles.sectionActionTitle}>Recintos Electorales Georreferenciados</Text>
+              <View style={styles.mapBadgeHeaderRow}>
+                <Text style={styles.sectionHeroOverline}>CARTOGRAFÍA LEAFLET & OPENSTREETMAP (ADR-04)</Text>
                 <View style={styles.geocercaBadge}>
                   <Text style={styles.geocercaBadgeText}>RADIO 200M</Text>
+                </View>
+              </View>
+              <Text style={styles.sectionHeroTitle}>Mapa Territorial Interactivo</Text>
+              <Text style={styles.sectionHeroSubtitle}>
+                Supervisión perimetral y cobertura de los 12 recintos electorales del Cantón Quito
+              </Text>
+            </View>
+
+            {/* Mapa Interactivo Principal en WebView */}
+            <View style={styles.mapCard}>
+              <View style={styles.mapCardTopRow}>
+                <View style={styles.mapCardTitleGroup}>
+                  <MapPin size={16} color={BrandColors.azulTitulos} />
+                  <Text style={styles.mapCardTitle}>Recintos Electorales Georreferenciados</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.mapRefreshBtn}
+                  onPress={() => {
+                    void seguimiento.actualizar();
+                    if (mapaListoRef.current) {
+                      const script = actualizarMapaElectoral(datosMapa);
+                      webViewRef.current?.injectJavaScript(script);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <RefreshCw size={13} color={BrandColors.azulTitulos} />
+                  <Text style={styles.mapRefreshBtnText}>Actualizar</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* WebView Nativa de Leaflet */}
+              <View style={styles.webViewContainer}>
+                <WebView
+                  ref={webViewRef}
+                  originWhitelist={['*']}
+                  source={{ html: docMapa.html, baseUrl: docMapa.baseUrl }}
+                  style={styles.webView}
+                  onMessage={handleMensajeMapa}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+                  applicationNameForUserAgent="ActaQuito/1.0"
+                  startInLoadingState={true}
+                  renderLoading={() => (
+                    <View style={styles.mapLoadingOverlay}>
+                      <ActivityIndicator size="small" color={BrandColors.azulTitulos} />
+                      <Text style={styles.mapLoadingText}>Cargando mapa electoral...</Text>
+                    </View>
+                  )}
+                  renderError={() => (
+                    <View style={styles.mapErrorOverlay}>
+                      <AlertCircle size={20} color={BrandColors.rojoAlerta} />
+                      <Text style={styles.mapErrorTitle}>No se pudo cargar el mapa</Text>
+                      <Text style={styles.mapErrorDesc}>
+                        Verifica la conexión para cargar las teselas libres de OpenStreetMap.
+                      </Text>
+                    </View>
+                  )}
+                />
+              </View>
+
+              <View style={styles.mapCardFooter}>
+                <Text style={styles.mapCardFooterText}>
+                  Toca un marcador en el mapa para ver mesas reportadas y abrir la ficha del recinto.
+                </Text>
+              </View>
+            </View>
+
+            {/* Cobertura Territorial de los 12 Recintos (Lista Complementaria) */}
+            <View style={styles.sectionHeaderCard}>
+              <View style={styles.mapHeaderRow}>
+                <Text style={styles.sectionActionTitle}>Recintos de la Jurisdicción</Text>
+                <View style={styles.geocercaBadge}>
+                  <Text style={styles.geocercaBadgeText}>{datosMapa.recintos.length} RECINTOS</Text>
                 </View>
               </View>
               <Text style={styles.sectionActionSubtitle}>
@@ -1399,5 +1523,112 @@ const styles = StyleSheet.create({
     fontFamily: FontFamilies.titleBold,
     fontSize: 9.5,
     color: BrandColors.verdeExito,
+  },
+  mapBadgeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  mapCard: {
+    backgroundColor: BrandColors.blancoSuperficie,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+    overflow: 'hidden',
+    marginBottom: Spacing.md,
+    ...Elevations.card,
+  },
+  mapCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    backgroundColor: BrandColors.superficieCalida,
+    borderBottomWidth: 1,
+    borderBottomColor: BrandColors.azulBorde,
+  },
+  mapCardTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  mapCardTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 12.5,
+    color: BrandColors.azulTitulos,
+  },
+  mapRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: BrandColors.azulSuperficie,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: BrandColors.azulBorde,
+  },
+  mapRefreshBtnText: {
+    fontFamily: FontFamilies.titleSemiBold,
+    fontSize: 11,
+    color: BrandColors.azulTitulos,
+  },
+  webViewContainer: {
+    height: 380,
+    width: '100%',
+    backgroundColor: '#E5E3DF',
+    position: 'relative',
+  },
+  webView: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  mapLoadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(247, 244, 239, 0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    zIndex: 10,
+  },
+  mapLoadingText: {
+    fontFamily: FontFamilies.titleSemiBold,
+    fontSize: 12,
+    color: BrandColors.azulTitulos,
+  },
+  mapErrorOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(255, 235, 238, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+    gap: 6,
+    zIndex: 10,
+  },
+  mapErrorTitle: {
+    fontFamily: FontFamilies.titleBold,
+    fontSize: 13,
+    color: BrandColors.rojoAlerta,
+  },
+  mapErrorDesc: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 11,
+    color: BrandColors.textoSecundario,
+    textAlign: 'center',
+  },
+  mapCardFooter: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+    backgroundColor: BrandColors.superficieCalida,
+    borderTopWidth: 1,
+    borderTopColor: BrandColors.azulBorde,
+  },
+  mapCardFooterText: {
+    fontFamily: FontFamilies.bodyRegular,
+    fontSize: 11,
+    color: BrandColors.textoSecundario,
   },
 });

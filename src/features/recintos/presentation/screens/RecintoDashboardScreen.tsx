@@ -156,7 +156,7 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
         style={styles.container}
         contentContainerStyle={[
           styles.contentContainer,
-          { paddingHorizontal: horizontalPadding, paddingBottom: 88 },
+          { paddingHorizontal: horizontalPadding, paddingBottom: 100 },
         ]}
         showsVerticalScrollIndicator={false}
         refreshControl={

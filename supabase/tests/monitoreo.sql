@@ -24,7 +24,7 @@ declare
 begin
     for fila in select * from (values
         (1, null, null, '1700000019'), (2, 1, null, '1700000027'),
-        (3, 2, 'R01', '1700000035'), (4, 1, null, '1700000043')
+        (3, 2, 'R01', '1700000035'), (4, 1, null, '1700000043'), (5, 4, 'R02', '1700000050'), (6, 1, null, '1700000068')
     ) as f(n, actor, recinto, cedula) order by n loop
         correo := 'monitoreo-prueba-' || fila.n || '@example.test';
         reserva := public.reservar_invitacion(pg_temp.persona(fila.actor), fila.recinto,
@@ -63,6 +63,12 @@ begin
     end if;
 end;
 $$;
+
+insert into public.provincias values ('FUERA_PRUEBA', 'Provincia de prueba');
+insert into public.cantones values ('FUERA_PRUEBA', 'FUERA_PRUEBA', 'Cantón de prueba');
+insert into public.parroquias values ('FUERA_PRUEBA', 'FUERA_PRUEBA', 'Parroquia de prueba', 'urbana');
+insert into public.recintos values ('FUERA_PRUEBA', 'FUERA_PRUEBA', 'Recinto de prueba', 0, 0);
+insert into public.senal_monitoreo_electoral (recinto_codigo) values ('FUERA_PRUEBA');
 
 set local role authenticated;
 select pg_temp.sesion(2);
@@ -148,7 +154,7 @@ begin
        or not exists (select 1 from public.resultados_preliminares where recinto_codigo = 'R01'
            and dignidad_codigo = 'ALCALDIA' and actas_confirmadas = 1 and sufragantes = 5
            and (candidaturas->0->>'votos')::numeric = 1 and blancos = 2 and nulos = 0)
-       or not exists (select 1 from public.resultados_preliminares where recinto_codigo is null
+       or not exists (select 1 from public.resultados_preliminares where recinto_codigo = 'R01'
            and dignidad_codigo = 'PREFECTURA' and actas_confirmadas = 1 and sufragantes = 3
            and votos_validos = 0 and candidaturas->0->'porcentaje_votos_validos' = 'null')
        or not exists (select 1 from public.actas_confirmadas_monitoreo a join public.actas_evidencias e using (acta_id)
@@ -171,6 +177,77 @@ begin
 end;
 $$;
 
+select public.asignar_veedor('R02', 1::smallint, pg_temp.persona(5));
+select pg_temp.sesion(5);
+select public.guardar_borrador_acta(pg_temp.acta(3), gen_random_uuid(), 'R02', 1::smallint, 'ALCALDIA',
+    '{"MFC":7,"ARP":0,"MUC":0,"FDP":0,"MNE":0}', 0, 0, 7);
+select public.reservar_evidencia_acta(pg_temp.acta(3), 1, pg_temp.operacion(3), repeat('a', 64),
+    r.latitud, r.longitud, 9, now(), now()) from public.recintos r where r.codigo = 'R02';
+reset role;
+insert into storage.objects (bucket_id, name, metadata)
+select 'actas-evidencia', ruta, '{"mimetype":"image/jpeg"}'
+from actaquito_privado.reservas_evidencia where operacion_id = pg_temp.operacion(3);
+set local role service_role;
+select public.confirmar_evidencia_acta(pg_temp.operacion(3), repeat('a', 64));
+reset role;
+set local role authenticated;
+do $$
+declare
+    rol integer;
+begin
+    if not has_column_privilege(current_user, 'public.actas_revisiones', 'acta_id', 'SELECT')
+       or exists (
+         select 1 from unnest(array['version','votos','blancos','nulos','sufragantes','recibida_en']) as c(nombre)
+         where not has_column_privilege(current_user, 'public.actas_revisiones', c.nombre, 'SELECT')
+       ) or has_column_privilege(current_user, 'public.actas_revisiones', 'actor_cedula', 'SELECT') then
+        raise exception 'Los GRANT de columnas son incompletos o excesivos';
+    end if;
+    perform pg_temp.sesion(1);
+    if (select count(*) from public.actas_confirmadas_monitoreo) <> 3
+       or not exists (select 1 from public.resultados_preliminares where recinto_codigo is null
+           and dignidad_codigo = 'ALCALDIA' and actas_confirmadas = 2 and sufragantes = 12)
+       or (select count(*) from public.senal_monitoreo_electoral) <> 2
+       or exists (select 1 from public.mapa_recintos_electoral where codigo = 'FUERA_PRUEBA') then
+        raise exception 'El provincial no puede consultar ambos recintos o excede su jurisdicción';
+    end if;
+    foreach rol in array array[2,4] loop
+        perform pg_temp.sesion(rol);
+        if (select count(*) from public.mapa_recintos_electoral) <> 1
+           or (select count(*) from public.resultados_preliminares) <> 2
+           or exists (select 1 from public.resultados_preliminares where recinto_codigo is distinct from
+               case when rol = 2 then 'R01' else 'R02' end)
+           or (select count(*) from public.actas_confirmadas_monitoreo) <> (case when rol = 2 then 2 else 1 end)
+           or exists (select 1 from public.senal_monitoreo_electoral where recinto_codigo <>
+               case when rol = 2 then 'R01' else 'R02' end)
+           or (select count(*) from public.senal_monitoreo_electoral) <> 1 then
+            raise exception 'Ámbito incorrecto para el coordinador %', rol;
+        end if;
+    end loop;
+    perform pg_temp.sesion(6);
+    if public.leer_monitoreo_electoral() <> '{"actas":[],"resultados":[],"recintos":[]}'::jsonb
+       or exists (select 1 from public.senal_monitoreo_electoral) then
+        raise exception 'Un coordinador sin asignación accedió al monitoreo';
+    end if;
+end;
+$$;
+reset role;
+set local role anon;
+do $$
+begin
+    begin
+        perform public.leer_monitoreo_electoral();
+        raise exception 'El rol anónimo ejecutó la RPC';
+    exception when insufficient_privilege then null;
+    end;
+    begin
+        perform 1 from public.senal_monitoreo_electoral;
+        raise exception 'El rol anónimo recibió la señal';
+    exception when insufficient_privilege then null;
+    end;
+end;
+$$;
+reset role;
+set local role authenticated;
 select pg_temp.sesion(3);
 do $$
 begin
