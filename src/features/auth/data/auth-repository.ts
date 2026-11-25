@@ -1,15 +1,16 @@
 import { QueryClient } from '@tanstack/react-query';
-import { isAuthRetryableFetchError, type AuthError, type Session } from '@supabase/supabase-js';
+import { isAuthPKCECodeVerifierMissingError, isAuthRetryableFetchError, type AuthError, type Session } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { AuthProblem, type Access, type AuthLink, type AuthRepository, type Profile } from '../domain/auth';
 import { recoveryRedirect } from './auth-links';
 import { authStorage } from './auth-storage';
 import { preparePkce } from './pkce';
-import { mobileSupabase, profileStorageKey, readJwtPayload } from './supabase-client';
+import { mobileSupabase, profileStorageKey, readJwtPayload, recoveryVerifierStorageKey } from './supabase-client';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, networkMode: 'always' } } });
 const guest: Access = { kind: 'guest' };
 const rememberedKey = profileStorageKey;
+const pendingRecoveryKey = profileStorageKey + ':pending-recovery';
 const profileSchema = z.object({
   id: z.string(),
   role: z.enum(['provincial', 'recinto', 'veedor']),
@@ -17,12 +18,13 @@ const profileSchema = z.object({
 });
 const rememberedSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('operational'), profile: profileSchema, sessionId: z.string() }),
-  z.object({ kind: z.literal('setup'), flow: z.enum(['invite', 'recovery']), userId: z.string(), sessionId: z.string() }),
+  z.object({ kind: z.literal('setup'), flow: z.enum(['invite', 'recovery']), userId: z.string(), sessionId: z.string(), fingerprint: z.string().optional() }),
 ]);
 type Remembered = z.infer<typeof rememberedSchema>;
 class ConnectionProblem extends AuthProblem {}
 
 function authError(error: AuthError) {
+  if (isAuthPKCECodeVerifierMissingError(error)) return missingRecoveryVerifier();
   if (isAuthRetryableFetchError(error)) return new ConnectionProblem('No hay conexión con el servicio de acceso. Inténtalo de nuevo.');
   switch (error.code) {
     case 'invalid_credentials': return new AuthProblem('El correo o la contraseña no coinciden.');
@@ -37,6 +39,40 @@ function authError(error: AuthError) {
     case 'over_request_rate_limit': return new AuthProblem('Hay demasiadas solicitudes. Espera un momento e inténtalo de nuevo.');
     default: return new AuthProblem('El servicio de acceso no pudo completar la solicitud.');
   }
+}
+
+function missingRecoveryVerifier() {
+  return new AuthProblem('No encontramos la solicitud de recuperación en esta instalación. Pide un enlace nuevo y ábrelo en esta misma app.');
+}
+
+function recoveryExchangeError(error: AuthError) {
+  if (isAuthPKCECodeVerifierMissingError(error) || isAuthRetryableFetchError(error)) return authError(error);
+  switch (error.code) {
+    case 'otp_expired':
+    case 'flow_state_expired':
+    case 'flow_state_not_found':
+    case 'bad_code_verifier': return authError(error);
+    default: return new AuthProblem('Supabase no pudo validar este enlace de recuperación. Solicita otro y usa el correo más reciente.');
+  }
+}
+
+function isStoredRecoveryVerifier(value: string | null): value is string {
+  if (!value) return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'string' && /^[A-Za-z0-9._~-]{43,128}\/PASSWORD_RECOVERY$/.test(parsed);
+  } catch {
+    return false;
+  }
+}
+
+async function preserveRecoveryVerifier() {
+  const backup = await authStorage.getItem(pendingRecoveryKey);
+  if (isStoredRecoveryVerifier(backup)) return backup;
+  const stored = await authStorage.getItem(recoveryVerifierStorageKey);
+  if (!isStoredRecoveryVerifier(stored)) return null;
+  await authStorage.setItem(pendingRecoveryKey, stored);
+  return stored;
 }
 
 async function readRemembered() {
@@ -106,7 +142,8 @@ async function queryProfile(id: string): Promise<Profile> {
   });
 }
 
-async function discardSession() {
+async function discardSession(keepRecovery = false) {
+  const pending = keepRecovery ? await preserveRecoveryVerifier() : null;
   const { auth } = mobileSupabase();
   // Local storage must be cleared even when the server cannot be reached.
   try {
@@ -117,6 +154,7 @@ async function discardSession() {
   } finally {
     queryClient.clear();
     await authStorage.clear();
+    if (pending) await authStorage.setItem(pendingRecoveryKey, pending);
   }
 }
 
@@ -128,6 +166,9 @@ function offlineAccess(saved: Remembered | null, userId?: string): Access | unde
 
 export const authRepository: AuthRepository = {
   async restore() {
+    // getSession and SDK initialization can remove an expired old session,
+    // including the SDK verifier. Keep the pending request independently.
+    await preserveRecoveryVerifier();
     const { auth } = mobileSupabase();
     const saved = await readRemembered();
     const { data, error } = await auth.getSession();
@@ -137,7 +178,7 @@ export const authRepository: AuthRepository = {
         if (offline) return offline;
         throw authError(error);
       }
-      await discardSession();
+      await discardSession(true);
       return guest;
     }
     const session = data.session;
@@ -153,7 +194,7 @@ export const authRepository: AuthRepository = {
         if (saved?.kind === 'setup' && saved.userId === session.user.id && saved.sessionId === claims.sessionId) {
           return { kind: 'setup', flow: saved.flow };
         }
-        await discardSession();
+        await discardSession(true);
         return guest;
       }
       if (saved?.kind !== 'operational' || saved.sessionId !== claims.sessionId || saved.profile.id !== session.user.id) {
@@ -168,7 +209,7 @@ export const authRepository: AuthRepository = {
         if (offline) return offline;
         throw error;
       }
-      await discardSession();
+      await discardSession(true);
       throw error;
     }
   },
@@ -191,15 +232,39 @@ export const authRepository: AuthRepository = {
   },
   async requestRecovery(email) {
     preparePkce();
+    await authStorage.removeItem(pendingRecoveryKey);
     const { error } = await mobileSupabase().auth.resetPasswordForEmail(email, { redirectTo: recoveryRedirect });
     if (error?.code === 'user_not_found') return;
     if (error) throw authError(error);
+    if (!await preserveRecoveryVerifier()) throw missingRecoveryVerifier();
   },
-  async acceptLink(link: AuthLink) {
+  async acceptLink(link: AuthLink, fingerprint?: string) {
+    const saved = fingerprint ? await readRemembered() : null;
+    if (saved?.kind === 'setup' && saved.flow === link.flow && saved.fingerprint === fingerprint) {
+      const restored = await this.restore();
+      if (restored.kind === 'setup' && restored.flow === link.flow) return restored;
+    }
+
     const { auth } = mobileSupabase();
+    async function exchangeRecovery(code: string) {
+      const verifier = await preserveRecoveryVerifier();
+      if (!verifier) throw missingRecoveryVerifier();
+
+      if (await authStorage.getItem(recoveryVerifierStorageKey) !== verifier) {
+        await authStorage.setItem(recoveryVerifierStorageKey, verifier);
+      }
+      try {
+        const result = await auth.exchangeCodeForSession(code);
+        if (result.error) throw recoveryExchangeError(result.error);
+        return result;
+      } finally {
+        await authStorage.removeItem(pendingRecoveryKey);
+      }
+    }
+
     const { data, error } = link.flow === 'invite'
       ? await auth.setSession({ access_token: link.accessToken, refresh_token: link.refreshToken })
-      : await auth.exchangeCodeForSession(link.code);
+      : await exchangeRecovery(link.code);
     if (error) throw authError(error);
     if (!data.session) throw new AuthProblem('El enlace no abrió una sesión válida.');
     try {
@@ -212,7 +277,7 @@ export const authRepository: AuthRepository = {
       if (!allowed || !claims.user.email_confirmed_at || claims.methods.includes('password')) {
         throw new AuthProblem('Esta sesión no corresponde al enlace. Solicita un enlace nuevo.');
       }
-      await remember({ kind: 'setup', flow: link.flow, userId: session.user.id, sessionId: claims.sessionId });
+      await remember({ kind: 'setup', flow: link.flow, userId: session.user.id, sessionId: claims.sessionId, fingerprint });
       return { kind: 'setup', flow: link.flow };
     } catch (error) {
       await discardSession();
@@ -235,7 +300,7 @@ export const authRepository: AuthRepository = {
     if (result.error) throw authError(result.error);
     await discardSession();
   },
-  signOut: discardSession,
+  signOut: () => discardSession(),
   setForeground(active) {
     try {
       const { auth } = mobileSupabase();

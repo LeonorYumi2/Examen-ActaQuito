@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
-import { webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -28,10 +28,12 @@ const links = load('data/auth-links.ts', {
 const forms = load('domain/forms.ts');
 const invitation = 'actaquito://auth/confirm#type=invite&access_token=a&refresh_token=b';
 const recovery = 'actaquito://auth/reset-password?code=reset';
+const verifierKey = 'test-session-code-verifier';
+const recoveryVerifier = JSON.stringify('v'.repeat(56) + '/PASSWORD_RECOVERY');
 
 function fixture(method, options = {}) {
   const events = [];
-  const cache = new Map();
+  const cache = options.cache ?? new Map();
   const profileKey = 'test-profile';
   const session = {
     access_token: 'test-token',
@@ -39,10 +41,25 @@ function fixture(method, options = {}) {
   };
   const auth = {
     async setSession() { events.push('setSession'); return { data: { session } }; },
-    async exchangeCodeForSession(code) { events.push(['exchange', code]); return { data: { session } }; },
-    async resetPasswordForEmail(email, redirect) { events.push(['reset', email, redirect.redirectTo]); return {}; },
+    async exchangeCodeForSession(code) {
+      events.push(['exchange', code]);
+      assert.equal(cache.get(verifierKey), recoveryVerifier);
+      cache.delete(verifierKey);
+      return options.exchangeResult ?? { data: { session } };
+    },
+    async resetPasswordForEmail(email, redirect) {
+      events.push(['reset', email, redirect.redirectTo]);
+      cache.set(verifierKey, recoveryVerifier);
+      return {};
+    },
     async signInWithPassword() { events.push('signIn'); return { data: { session } }; },
-    async getSession() { return { data: { session } }; },
+    async getSession() {
+      if (options.restoreError) {
+        cache.delete(verifierKey); // GoTrue removes the SDK verifier with the old session.
+        return { error: options.restoreError };
+      }
+      return { data: { session } };
+    },
     async getUser() { return { data: { user: session.user } }; },
     async updateUser() { events.push('updateUser'); return {}; },
     async stopAutoRefresh() {},
@@ -78,6 +95,7 @@ function fixture(method, options = {}) {
     './supabase-client': {
       mobileSupabase: () => client,
       profileStorageKey: profileKey,
+      recoveryVerifierStorageKey: verifierKey,
       readJwtPayload: () => ({ sub: 'user-1', role: 'authenticated', session_id: 'session-1', amr: method ? [{ method }] : undefined }),
     },
   });
@@ -91,10 +109,11 @@ test('una invitación toma los tokens únicamente del fragmento y exige el tipo 
   assert.equal(links.readAuthLink(invitation.replace('://auth', '://otro')), null);
 });
 
-test('la recuperación solo acepta un código y gestiona enlaces vencidos', () => {
+test('la recuperación distingue PKCE, token_hash, fragmentos y enlaces vencidos', () => {
   assert.deepEqual(links.readAuthLink(recovery).parse(), { flow: 'recovery', code: 'reset' });
   assert.throws(() => links.readAuthLink(recovery + '&code=otro').parse());
-  assert.throws(() => links.readAuthLink(recovery + '#access_token=a').parse());
+  assert.throws(() => links.readAuthLink(recovery + '#access_token=a').parse(), /código PKCE/);
+  assert.throws(() => links.readAuthLink('actaquito://auth/reset-password?type=recovery&token_hash=prueba').parse(), /código PKCE/);
   assert.throws(() => links.readAuthLink(recovery + '&error_code=otp_expired').parse(), /venció/);
 });
 
@@ -117,6 +136,53 @@ test('el código de recuperación usa PKCE y no abre un perfil', async () => {
     ['reset', 'test@example.test', 'actaquito://auth/reset-password'],
     ['exchange', 'reset'],
   ]);
+});
+
+test('el verificador cifrado de la solicitud sobrevive al arranque y a descartar una sesión antigua', async () => {
+  const original = fixture('recovery');
+  await original.authRepository.requestRecovery('test@example.test');
+  const restarted = fixture('recovery', { cache: original.cache, restoreError: { code: 'session_not_found' } });
+  assert.deepEqual(await restarted.authRepository.restore(), { kind: 'guest' });
+  assert.equal(restarted.cache.has(verifierKey), false);
+  assert.deepEqual(await restarted.authRepository.acceptLink(links.readAuthLink(recovery).parse()), { kind: 'setup', flow: 'recovery' });
+  assert.deepEqual(restarted.events, ['signOut', ['exchange', 'reset']]);
+  assert.equal(restarted.cache.has('test-profile:pending-recovery'), false);
+});
+
+test('un callback sin verificador se rechaza sin canjear el código', async () => {
+  const { authRepository, events } = fixture('recovery');
+  await assert.rejects(authRepository.acceptLink(links.readAuthLink(recovery).parse()), /misma app/);
+  assert.deepEqual(events, []);
+});
+
+test('el SDK identifica el verificador ausente sin enviar una solicitud', async () => {
+  const { createClient, isAuthPKCECodeVerifierMissingError } = realRequire('@supabase/supabase-js');
+  let llamadas = 0;
+  const sdk = createClient('https://test.example.test', 'sb_publishable_test', {
+    auth: { flowType: 'pkce', detectSessionInUrl: false, autoRefreshToken: false },
+    global: { fetch: async () => { llamadas++; return Response.json({}, { status: 400 }); } },
+  });
+  const { error } = await sdk.auth.exchangeCodeForSession('codigo-simulado');
+  assert.equal(isAuthPKCECodeVerifierMissingError(error), true);
+  assert.equal(error.code, 'pkce_code_verifier_not_found');
+  assert.equal(llamadas, 0);
+});
+
+test('un error de canje borra el verificador pendiente y devuelve un mensaje seguro', async () => {
+  const { authRepository, cache } = fixture('recovery', { exchangeResult: { error: { code: 'validation_failed' } } });
+  await authRepository.requestRecovery('test@example.test');
+  await assert.rejects(authRepository.acceptLink(links.readAuthLink(recovery).parse()), /correo más reciente/);
+  assert.equal(cache.has('test-profile:pending-recovery'), false);
+});
+
+test('un enlace ya canjeado no oculta la sesión temporal al reabrir la app', async () => {
+  const first = fixture('recovery');
+  await first.authRepository.requestRecovery('test@example.test');
+  await first.authRepository.acceptLink(links.readAuthLink(recovery).parse(), 'huella');
+  const restarted = fixture('recovery', { cache: first.cache });
+  assert.deepEqual(await restarted.authRepository.acceptLink(links.readAuthLink(recovery).parse(), 'huella'),
+    { kind: 'setup', flow: 'recovery' });
+  assert.deepEqual(restarted.events, []);
 });
 
 test('una sesión con contraseña no puede disfrazarse como invitación', async () => {
@@ -197,15 +263,16 @@ test('el SDK genera S256 y guarda el verificador con las primitivas nativas', as
   }
 });
 
-test('se ignora un segundo evento con el mismo enlace', async () => {
-  const { authRepository, events } = fixture('otp');
+test('se ignora un segundo evento con la misma credencial aunque la URL incorpore otro parámetro', async () => {
+  const { authRepository, events } = fixture('recovery');
   const { useAuth } = load('presentation/auth-state.ts', {
-    'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'SHA-256' }, digestStringAsync: async () => 'same-link-hash' },
+    'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'SHA-256' }, digestStringAsync: async (_algorithm, input) => createHash('sha256').update(input).digest('hex') },
     '../data/auth-links': links,
     '../data/auth-repository': { authRepository },
     '../domain/auth': domain,
   });
-  await Promise.all([useAuth.getState().openLink(invitation), useAuth.getState().openLink(invitation)]);
-  assert.deepEqual(events, ['setSession']);
-  assert.deepEqual(useAuth.getState().access, { kind: 'setup', flow: 'invite' });
+  await useAuth.getState().requestRecovery('test@example.test');
+  await Promise.all([useAuth.getState().openLink(recovery), useAuth.getState().openLink(recovery + '&origen=correo')]);
+  assert.deepEqual(events, [['reset', 'test@example.test', links.recoveryRedirect], ['exchange', 'reset']]);
+  assert.deepEqual(useAuth.getState().access, { kind: 'setup', flow: 'recovery' });
 });

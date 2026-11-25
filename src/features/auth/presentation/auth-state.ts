@@ -54,7 +54,8 @@ export const useAuth = create<AuthState>((set, get) => ({
     const received = readAuthLink(url);
     if (!received) return;
     try {
-      const fingerprint = await digestStringAsync(CryptoDigestAlgorithm.SHA256, url);
+      const parsed = received.parse();
+      const fingerprint = await digestStringAsync(CryptoDigestAlgorithm.SHA256, JSON.stringify(parsed));
       if (seenLinks.has(fingerprint)) return;
       seenLinks.add(fingerprint);
       if (seenLinks.size > 32) {
@@ -66,12 +67,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (get().access?.kind === 'operational') {
         throw new AuthProblem('Cierra tu sesión antes de abrir un enlace de acceso.');
       }
-      const parsed = received.parse();
-      if (get().access?.kind === 'setup' && parsed.flow === 'invite') {
-        await authRepository.signOut();
-        set({ access: guest });
-      }
-      const access = await authRepository.acceptLink(parsed);
+      const access = await authRepository.acceptLink(parsed, fingerprint);
       set({ access, problem: null, notice: null, link: null });
     } catch (error) {
       set({ link: { flow: received.flow, state: 'error', message: authMessage(error) } });

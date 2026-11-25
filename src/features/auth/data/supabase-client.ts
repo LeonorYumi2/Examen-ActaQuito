@@ -6,6 +6,9 @@ import { authStorage } from './auth-storage';
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
 const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
 const storageKey = 'actaquito.auth:' + (url ?? '');
+const sessionStorageKey = storageKey + ':session';
+// GoTrue 2.98 stores the verifier under this key before sending /recover.
+export const recoveryVerifierStorageKey = sessionStorageKey + '-code-verifier';
 export const profileStorageKey = storageKey + ':access';
 let client: SupabaseClient | undefined;
 
@@ -43,7 +46,7 @@ export function mobileSupabase() {
   client ??= createClient(url, key, {
     auth: {
       flowType: 'pkce',
-      storageKey: storageKey + ':session',
+      storageKey: sessionStorageKey,
       storage: authStorage,
       persistSession: true,
       autoRefreshToken: false,

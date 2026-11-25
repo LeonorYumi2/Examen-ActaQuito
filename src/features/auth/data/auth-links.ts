@@ -25,8 +25,13 @@ export function readAuthLink(raw: string): { flow: PasswordFlow; parse: () => Au
         throw new AuthProblem('El enlace venció o ya se usó. Solicita uno nuevo.');
       }
       if (flow === 'recovery') {
+        if (query.has('token_hash') || fragment.has('token_hash')
+            || fragment.has('access_token') || fragment.has('refresh_token')
+            || query.has('access_token') || query.has('refresh_token')) {
+          throw new AuthProblem('Este correo no contiene el código PKCE requerido. Solicita un enlace nuevo desde ActaQuito.');
+        }
         const codes = query.getAll('code');
-        if (codes.length === 1 && codes[0] && !url.hash && !query.has('access_token') && !query.has('refresh_token')) {
+        if (codes.length === 1 && codes[0] && !url.hash) {
           return { flow, code: codes[0] };
         }
       } else {

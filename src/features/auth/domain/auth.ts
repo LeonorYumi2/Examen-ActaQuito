@@ -20,7 +20,7 @@ export interface AuthRepository {
   restore(): Promise<Access>;
   signIn(email: string, password: string): Promise<Access>;
   requestRecovery(email: string): Promise<void>;
-  acceptLink(link: AuthLink): Promise<Access>;
+  acceptLink(link: AuthLink, fingerprint?: string): Promise<Access>;
   setPassword(password: string): Promise<void>;
   signOut(): Promise<void>;
   setForeground(active: boolean): void;

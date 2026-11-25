@@ -101,7 +101,7 @@ export function ForgotPasswordScreen() {
           editable={!isSubmitting} error={fieldState.error?.message} />
       )} />
       <AuthButton label={isSubmitting ? 'Enviando…' : 'Enviar enlace'} busy={isSubmitting} onPress={() => { void submit(); }} />
-      <AuthButton label="Volver al inicio de sesión" secondary disabled={isSubmitting}
+      <AuthButton label="Volver al inicio de sesión" secondary wrapLabel disabled={isSubmitting}
         onPress={() => router.replace('/auth/login')} />
     </AuthPanel>
   );
@@ -175,7 +175,7 @@ export function PasswordSetupScreen({ flow }: { flow: PasswordFlow }) {
         <AuthButton label="Solicitar otro enlace" onPress={() => router.replace('/auth/forgot-password')} />
       )}
       <AuthButton label={access?.kind === 'operational' ? 'Volver a mi inicio' : 'Volver al inicio de sesión'}
-        secondary busy={leaving} disabled={isSubmitting || checking} onPress={() => { void back(); }} />
+        secondary wrapLabel busy={leaving} disabled={isSubmitting || checking} onPress={() => { void back(); }} />
     </AuthPanel>
   );
 }

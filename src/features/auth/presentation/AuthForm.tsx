@@ -109,7 +109,7 @@ export function AuthPanel({
             {/* 5. Pie Cívico Integrado de Cierre (vinculado al formulario con margen controlado) */}
             <View style={styles.footerSection}>
               <View style={styles.footerDivider} />
-              <Text style={styles.footerText}>
+              <Text style={[styles.footerText, styles.wrapText]}>
                 SISTEMA DE CONTROL ELECTORAL · CANTÓN QUITO
               </Text>
             </View>
@@ -165,12 +165,14 @@ export function AuthButton({
   label,
   busy,
   secondary,
+  wrapLabel,
   disabled,
   onPress,
 }: {
   label: string;
   busy?: boolean;
   secondary?: boolean;
+  wrapLabel?: boolean;
   disabled?: boolean;
   onPress: () => void;
 }) {
@@ -188,7 +190,7 @@ export function AuthButton({
           (pressed || locked) && styles.secondaryMuted,
         ]}
       >
-        <Text style={styles.secondaryButtonText}>{label}</Text>
+        <Text style={[styles.secondaryButtonText, wrapLabel && styles.wrapText]}>{label}</Text>
       </Pressable>
     );
   }
@@ -554,6 +556,10 @@ const styles = StyleSheet.create({
     color: BrandColors.textoMuted,
     textAlign: 'center',
     letterSpacing: 0.8,
+  },
+  wrapText: {
+    alignSelf: 'stretch',
+    flexShrink: 1,
   },
   progressRow: {
     flexDirection: 'row',
