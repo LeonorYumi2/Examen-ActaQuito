@@ -24,6 +24,7 @@ type AuthState = {
 const guest: Access = { kind: 'guest' };
 const seenLinks = new Set<string>();
 let queued: Promise<unknown> = Promise.resolve();
+let pendingRecovery: Promise<void> | undefined;
 
 function serialize<T>(operation: () => Promise<T>) {
   const result = queued.then(operation);
@@ -49,7 +50,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     const access = await authRepository.signIn(email, password);
     set({ access, link: null });
   }),
-  requestRecovery: (email) => serialize(() => authRepository.requestRecovery(email)),
+  requestRecovery: (email) => {
+    pendingRecovery ??= serialize(() => authRepository.requestRecovery(email)).finally(() => {
+      pendingRecovery = undefined;
+    });
+    return pendingRecovery;
+  },
   openLink: (url) => serialize(async () => {
     const received = readAuthLink(url);
     if (!received) return;

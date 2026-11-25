@@ -45,6 +45,21 @@ function missingRecoveryVerifier() {
   return new AuthProblem('No encontramos la solicitud de recuperación en esta instalación. Pide un enlace nuevo y ábrelo en esta misma app.');
 }
 
+function recoveryRequestError(error: AuthError) {
+  if (error.status !== 429 && error.code !== 'over_email_send_rate_limit' && error.code !== 'over_request_rate_limit') {
+    return authError(error);
+  }
+
+  const match = /\bonly request this after ([1-9]\d*) seconds?\b/i.exec(error.message);
+  const seconds = Number(match?.[1]);
+  if (!Number.isSafeInteger(seconds)) {
+    return new AuthProblem('Hay demasiadas solicitudes. Inténtalo más tarde.');
+  }
+
+  const unit = seconds === 1 ? 'segundo' : 'segundos';
+  return new AuthProblem(`Por seguridad, espera ${seconds} ${unit} antes de solicitar otro enlace.`);
+}
+
 function recoveryExchangeError(error: AuthError) {
   if (isAuthPKCECodeVerifierMissingError(error) || isAuthRetryableFetchError(error)) return authError(error);
   switch (error.code) {
@@ -232,11 +247,17 @@ export const authRepository: AuthRepository = {
   },
   async requestRecovery(email) {
     preparePkce();
-    await authStorage.removeItem(pendingRecoveryKey);
+    // GoTrue overwrites its slot before /recover and removes it on rejection.
+    // Keep the last accepted verifier until a new request succeeds.
+    await preserveRecoveryVerifier();
     const { error } = await mobileSupabase().auth.resetPasswordForEmail(email, { redirectTo: recoveryRedirect });
     if (error?.code === 'user_not_found') return;
-    if (error) throw authError(error);
-    if (!await preserveRecoveryVerifier()) throw missingRecoveryVerifier();
+    if (error) throw recoveryRequestError(error);
+    const verifier = await authStorage.getItem(recoveryVerifierStorageKey);
+    if (!isStoredRecoveryVerifier(verifier)) {
+      throw new AuthProblem('No pudimos guardar la solicitud en esta instalación. Cierra y vuelve a abrir ActaQuito antes de intentarlo de nuevo.');
+    }
+    await authStorage.setItem(pendingRecoveryKey, verifier);
   },
   async acceptLink(link: AuthLink, fingerprint?: string) {
     const saved = fingerprint ? await readRemembered() : null;

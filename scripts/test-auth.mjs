@@ -43,19 +43,23 @@ function fixture(method, options = {}) {
     async setSession() { events.push('setSession'); return { data: { session } }; },
     async exchangeCodeForSession(code) {
       events.push(['exchange', code]);
-      assert.equal(cache.get(verifierKey), recoveryVerifier);
-      cache.delete(verifierKey);
+      assert.equal(await storage.getItem(verifierKey), recoveryVerifier);
+      await storage.removeItem(verifierKey);
       return options.exchangeResult ?? { data: { session } };
     },
     async resetPasswordForEmail(email, redirect) {
       events.push(['reset', email, redirect.redirectTo]);
-      cache.set(verifierKey, recoveryVerifier);
+      if (options.resetError) {
+        await storage.removeItem(verifierKey);
+        return { error: options.resetError };
+      }
+      await storage.setItem(verifierKey, recoveryVerifier);
       return {};
     },
     async signInWithPassword() { events.push('signIn'); return { data: { session } }; },
     async getSession() {
       if (options.restoreError) {
-        cache.delete(verifierKey); // GoTrue removes the SDK verifier with the old session.
+        await storage.removeItem(verifierKey); // GoTrue removes the SDK verifier with the old session.
         return { error: options.restoreError };
       }
       return { data: { session } };
@@ -81,7 +85,7 @@ function fixture(method, options = {}) {
       };
     },
   };
-  const storage = {
+  const storage = options.storage ?? {
     async setItem(key, value) { cache.set(key, value); },
     async getItem(key) { return cache.get(key); },
     async removeItem(key) { cache.delete(key); },
@@ -275,4 +279,137 @@ test('se ignora un segundo evento con la misma credencial aunque la URL incorpor
   await Promise.all([useAuth.getState().openLink(recovery), useAuth.getState().openLink(recovery + '&origen=correo')]);
   assert.deepEqual(events, [['reset', 'test@example.test', links.recoveryRedirect], ['exchange', 'reset']]);
   assert.deepEqual(useAuth.getState().access, { kind: 'setup', flow: 'recovery' });
+});
+
+test('la recuperación traduce la espera explícita del servidor en singular y plural', async () => {
+  for (const [seconds, unit] of [[39, 'segundos'], [1, 'segundo']]) {
+    const { authRepository } = fixture('recovery', { resetError: {
+      status: 429,
+      code: 'over_email_send_rate_limit',
+      message: 'For security purposes, you can only request this after ' + seconds + ' second' +
+        (seconds === 1 ? '.' : 's.'),
+    } });
+    await assert.rejects(authRepository.requestRecovery('test@example.test'), {
+      message: 'Por seguridad, espera ' + seconds + ' ' + unit + ' antes de solicitar otro enlace.',
+    });
+  }
+});
+
+test('un 429 sin espera explícita no muestra cifras ni detalles del servidor', async () => {
+  const { authRepository } = fixture('recovery', { resetError: {
+    status: 429,
+    code: 'over_email_send_rate_limit',
+    message: 'Email rate limit exceeded. Reference 123.',
+  } });
+  await assert.rejects(authRepository.requestRecovery('test@example.test'), {
+    message: 'Hay demasiadas solicitudes. Inténtalo más tarde.',
+  });
+});
+
+test('los envíos simultáneos comparten la solicitud y se puede reintentar tras un rechazo', async () => {
+  let calls = 0;
+  let rejectFirst;
+  const firstRequest = new Promise((_resolve, reject) => { rejectFirst = reject; });
+  const { useAuth } = load('presentation/auth-state.ts', {
+    'expo-crypto': {},
+    '../data/auth-links': links,
+    '../data/auth-repository': { authRepository: {
+      requestRecovery() {
+        calls++;
+        return calls === 1 ? firstRequest : Promise.resolve();
+      },
+    } },
+    '../domain/auth': domain,
+  });
+  const { requestRecovery } = useAuth.getState();
+  const first = requestRecovery('test@example.test');
+  assert.equal(requestRecovery('test@example.test'), first);
+  const rejected = assert.rejects(first, /429/);
+  rejectFirst(new Error('429'));
+  await rejected;
+  assert.equal(calls, 1);
+  await requestRecovery('test@example.test');
+  assert.equal(calls, 2);
+});
+
+test('Android recupera el verificador cifrado tras reiniciar y conserva la sesión temporal', async () => {
+  const rows = new Map();
+  const keystore = new Map();
+  const nonceSize = 12;
+  const webKey = (raw) => webcrypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  const createStorage = () => load('data/auth-storage.native.ts', {
+    'expo-crypto': {
+      AESEncryptionKey: {
+        async generate() {
+          const bytes = webcrypto.getRandomValues(new Uint8Array(32));
+          return { key: await webKey(bytes), encoded: async () => Buffer.from(bytes).toString('hex') };
+        },
+        async import(hex) { return { key: await webKey(Buffer.from(hex, 'hex')) }; },
+      },
+      AESSealedData: {
+        fromCombined(bytes) {
+          // android AesCryptoModule.fromCombined receives a ByteArray, not Base64.
+          assert.ok(bytes instanceof Uint8Array);
+          return bytes;
+        },
+      },
+      async aesEncryptAsync(value, { key }, { additionalData }) {
+        const iv = webcrypto.getRandomValues(new Uint8Array(nonceSize));
+        const encrypted = await webcrypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key, value);
+        return { combined: async () => Buffer.concat([iv, Buffer.from(encrypted)]).toString('base64') };
+      },
+      async aesDecryptAsync(bytes, { key }, { additionalData }) {
+        const iv = bytes.subarray(0, nonceSize);
+        return new Uint8Array(await webcrypto.subtle.decrypt(
+          { name: 'AES-GCM', iv, additionalData }, key, bytes.subarray(nonceSize),
+        ));
+      },
+    },
+    'expo-secure-store': {
+      getItemAsync: async (name) => keystore.get(name) ?? null,
+      setItemAsync: async (name, value) => { keystore.set(name, value); },
+      deleteItemAsync: async (name) => { keystore.delete(name); },
+    },
+    'expo-sqlite': {
+      openDatabaseAsync: async () => ({
+        execAsync: async () => {},
+        getFirstAsync: async (_sql, name) => rows.has(name) ? { sealed: rows.get(name) } : null,
+        runAsync: async (sql, name, sealed) => {
+          if (sql.startsWith('INSERT')) rows.set(name, sealed);
+          else if (name) rows.delete(name);
+          else rows.clear();
+        },
+      }),
+    },
+  }).authStorage;
+
+  const first = fixture('recovery', { storage: createStorage() });
+  await first.authRepository.requestRecovery('test@example.test');
+  assert.equal(rows.has(verifierKey), true);
+  assert.ok(!rows.get(verifierKey).includes(recoveryVerifier));
+
+  const restarted = fixture('recovery', { storage: createStorage() });
+  await restarted.authRepository.restore();
+  const callback = links.readAuthLink(recovery).parse();
+  const result = { kind: 'setup', flow: 'recovery' };
+  assert.deepEqual(await restarted.authRepository.acceptLink(callback, 'fingerprint'), result);
+  assert.deepEqual(await restarted.authRepository.acceptLink(callback, 'fingerprint'), result);
+  assert.deepEqual(await restarted.authRepository.restore(), result);
+  assert.deepEqual(restarted.events.filter(Array.isArray), [['exchange', 'reset']]);
+  assert.equal(rows.has(verifierKey), false);
+  assert.equal(rows.has('test-profile:pending-recovery'), false);
+});
+
+test('un reenvío rechazado no invalida el verificador del enlace anterior', async () => {
+  const cache = new Map();
+  await fixture('recovery', { cache }).authRepository.requestRecovery('test@example.test');
+  const { authRepository, events } = fixture('recovery', {
+    cache, resetError: { status: 429, message: 'Too many requests' },
+  });
+  await assert.rejects(authRepository.requestRecovery('test@example.test'));
+  assert.equal(cache.has(verifierKey), false);
+  assert.deepEqual(await authRepository.acceptLink(links.readAuthLink(recovery).parse()), {
+    kind: 'setup', flow: 'recovery',
+  });
+  assert.equal(events.filter(([operation]) => operation === 'exchange').length, 1);
 });

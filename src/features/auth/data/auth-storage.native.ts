@@ -35,7 +35,9 @@ export const authStorage = {
       const key = await AESEncryptionKey.import(raw, 'hex');
       // Authenticate the storage key together with the ciphertext.
       try {
-        const bytes = await aesDecryptAsync(AESSealedData.fromCombined(row.sealed), key, {
+        // Android's native fromCombined expects Uint8Array even when the JS API accepts Base64.
+        const combined = Uint8Array.from(atob(row.sealed), (char) => char.charCodeAt(0));
+        const bytes = await aesDecryptAsync(AESSealedData.fromCombined(combined), key, {
           additionalData: new TextEncoder().encode(name),
         });
         return new TextDecoder().decode(bytes);
