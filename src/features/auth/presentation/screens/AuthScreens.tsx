@@ -2,6 +2,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Redirect, router } from 'expo-router';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
+import { Alert } from 'react-native';
+import { solicitarPruebaSentryLocal } from '@/telemetria';
 import { authMessage, type PasswordFlow, type Role } from '../../domain/auth';
 import { loginForm, passwordForm, recoveryForm } from '../../domain/forms';
 import { AuthButton, AuthField, AuthMessage, AuthPanel, AuthProgress } from '../AuthForm';
@@ -66,6 +68,17 @@ export function LoginScreen() {
       <AuthButton label={isSubmitting ? 'Ingresando…' : 'Ingresar'} busy={isSubmitting} onPress={() => { void submit(); }} />
       <AuthButton label="Olvidé mi contraseña" secondary disabled={isSubmitting}
         onPress={() => router.push('/auth/forgot-password')} />
+      {__DEV__ && process.env.EXPO_PUBLIC_SENTRY_DEV_TEST === '1' && (
+        <AuthButton label="Probar Sentry (desarrollo)" secondary disabled={isSubmitting} onPress={() => {
+          const evento = solicitarPruebaSentryLocal();
+          if (!evento) {
+            Alert.alert('Sentry no disponible', 'Comprueba el DSN local y reinicia Metro.');
+            return;
+          }
+          console.info('[Sentry] Solicitud de prueba', evento);
+          Alert.alert('Envío a Sentry solicitado', 'ID del evento: ' + evento);
+        }} />
+      )}
     </AuthPanel>
   );
 }

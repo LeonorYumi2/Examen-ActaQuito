@@ -1,4 +1,3 @@
-import { habilitarPruebaSentryLocal, iniciarTelemetria } from './telemetria';
+import { iniciarTelemetria } from './telemetria';
 
 iniciarTelemetria();
-habilitarPruebaSentryLocal();

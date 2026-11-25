@@ -10,13 +10,9 @@ $env:EXPO_PUBLIC_SENTRY_DEV_TEST = '1'
 npx expo start --clear
 ```
 
-Abrir ActaQuito en Expo Go, presionar `j` en la terminal de Expo y ejecutar en la consola de React Native DevTools.
+Abrir ActaQuito en Expo Go y, en el login, pulsar **Probar Sentry (desarrollo)** debajo de **Olvidé mi contraseña**. La alerta muestra el ID solicitado y Metro registra ese mismo ID. No hace falta iniciar sesión ni abrir DevTools.
 
-```js
-await globalThis.probarSentryActaQuito()
-```
-
-El resultado contiene el ID del evento y el estado del vaciado de la cola. Buscar el ID en el proyecto Sentry, incluyendo el entorno `development`. Verificar la etiqueta `prueba:javascript-controlada`, el contexto técnico y el mensaje saneado. Revisar el JSON del evento y comprobar que no aparezcan `ACTAQUITO_SINTETICO_` ni `example.invalid`. La prueba puede ejecutarse desde el login sin iniciar sesión. En Expo Go solo habilita el SDK JavaScript. En desarrollo con opt-in, el filtro solo admite eventos con la etiqueta controlada.
+Buscar el ID en Sentry, en el entorno de desarrollo, con la etiqueta **prueba:javascript-interfaz**. La etiqueta distingue este evento del enviado desde Node. La alerta confirma la solicitud al SDK. La recepción se comprueba en Sentry.
 
 Después de cerrar Metro, retirar el opt-in de la sesión de PowerShell.
 

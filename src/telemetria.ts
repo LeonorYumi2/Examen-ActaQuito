@@ -27,7 +27,7 @@ export function iniciarTelemetria() {
     // La captura nativa debe pasar su propia auditoría de privacidad antes de habilitarse.
     enableNativeCrashHandling: false,
     beforeSend(evento, pista) {
-      if (pruebaLocal && evento.tags?.prueba !== 'javascript-controlada') return null;
+      if (pruebaLocal && evento.tags?.prueba !== 'javascript-interfaz') return null;
       if (pista.attachments) pista.attachments = [];
       return sanearEvento(evento, {
         modelo: Device.modelName,
@@ -49,18 +49,9 @@ export function reportarFalloElectoral(operacion: OperacionTelemetria) {
   Sentry.captureException(new Error('Fallo de una operación electoral'), { tags: { operacion } });
 }
 
-/** Prueba manual desde la consola de React Native DevTools. Solo existe con opt-in local. */
-export function habilitarPruebaSentryLocal() {
-  if (!__DEV__ || !activa || process.env.EXPO_PUBLIC_SENTRY_DEV_TEST !== '1') return;
-  const consola = globalThis as typeof globalThis & {
-    probarSentryActaQuito?: () => Promise<{ evento: string; vaciado: boolean }>;
-  };
-  consola.probarSentryActaQuito = async () => {
-    const evento = Sentry.captureException(new Error('ACTAQUITO_SINTETICO_MENSAJE'), {
-      tags: { prueba: 'javascript-controlada', privada: 'ACTAQUITO_SINTETICO_TAG' },
-      extra: { gps: 'ACTAQUITO_SINTETICO_GPS', foto: 'ACTAQUITO_SINTETICO_FOTO' },
-      user: { email: 'prueba-sintetica@example.invalid' },
-    });
-    return { evento, vaciado: await Sentry.flush() };
-  };
+export function solicitarPruebaSentryLocal(): string | undefined {
+  if (!__DEV__ || process.env.EXPO_PUBLIC_SENTRY_DEV_TEST !== '1' || !activa) return;
+  return Sentry.captureException(new Error('ACTAQUITO_TEST_SENTRY'), {
+    tags: { prueba: 'javascript-interfaz' },
+  });
 }

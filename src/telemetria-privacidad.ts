@@ -31,7 +31,7 @@ export function sanearEvento(evento: Event, equipo: Equipo, pantalla: PantallaTe
     release: typeof evento.release === 'string' && /^[\w.@+-]{1,100}$/.test(evento.release) ? evento.release : undefined,
     dist: typeof evento.dist === 'string' && /^[\w.-]{1,40}$/.test(evento.dist) ? evento.dist : undefined,
     tags: {
-      ...(evento.tags?.prueba === 'javascript-controlada' ? { prueba: 'javascript-controlada' } : {}),
+      ...(evento.tags?.prueba === 'javascript-interfaz' ? { prueba: 'javascript-interfaz' } : {}),
       pantalla: pantallas.includes(pantalla) ? pantalla : 'desconocida',
       ...(operacion === 'carga-evidencia' || operacion === 'sincronizacion-actas' ? { operacion } : {}),
     },

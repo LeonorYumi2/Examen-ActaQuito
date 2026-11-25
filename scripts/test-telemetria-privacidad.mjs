@@ -16,7 +16,7 @@ test('Sentry conserva diagnóstico técnico y descarta datos sensibles', () => {
     user: { email: correo }, request: { headers: { authorization: secreto } },
     extra: { gps, foto }, breadcrumbs: [{ message: secreto }],
     environment: 'development',
-    tags: { operacion: 'carga-evidencia', cedula: secreto, prueba: 'javascript-controlada' },
+    tags: { operacion: 'carga-evidencia', cedula: secreto, prueba: 'javascript-interfaz' },
     exception: { values: [{ type: 'Error', value: secreto, stacktrace: { frames: [
       { filename: 'app:///index.android.bundle', lineno: 12 },
       { filename: 'https://example.test/file.js?token=' + secreto },
@@ -24,7 +24,7 @@ test('Sentry conserva diagnóstico técnico y descarta datos sensibles', () => {
   }, { modelo: 'Pixel 6', versionSistema: '14', versionApp: '1.0.0' }, 'registro-actas');
   const cuerpo = JSON.stringify(evento);
   for (const dato of [secreto, correo, gps, foto]) assert.ok(!cuerpo.includes(dato));
-  assert.deepEqual(evento.tags, { pantalla: 'registro-actas', operacion: 'carga-evidencia', prueba: 'javascript-controlada' });
+  assert.deepEqual(evento.tags, { pantalla: 'registro-actas', operacion: 'carga-evidencia', prueba: 'javascript-interfaz' });
   assert.equal(evento.environment, 'development');
   assert.equal(evento.contexts.device.model, 'Pixel 6');
   assert.equal(evento.exception.values[0].stacktrace.frames.length, 1);
