@@ -17,6 +17,7 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { QuitoSkylineIllustration } from '@/components/ui/quito-skyline-illustration';
 import { QuitoCivicIsotype } from '@/components/ui/quito-civic-isotype';
 import { VectorIcon } from '@/components/ui/vector-icon';
+import { EditorialLottie } from '@/components/ui/editorial-lottie';
 import {
   BrandColors,
   Elevations,
@@ -136,10 +137,11 @@ export function AuthMessage({
   return (
     <Animated.View entering={FadeIn.duration(160).reduceMotion(ReduceMotion.System)}>
       <View style={[styles.messageBox, success ? styles.messageSuccess : styles.messageError]}>
-        <VectorIcon
-          name={success ? 'check-circle' : 'alert-triangle'}
-          size={16}
-          color={success ? BrandColors.verdeExito : BrandColors.rojoAlerta}
+        <EditorialLottie
+          type={success ? 'exito' : 'error'}
+          size={18}
+          loop={false}
+          accessibilityLabel={success ? 'Éxito' : 'Alerta'}
           style={styles.messageIcon}
         />
         <Text

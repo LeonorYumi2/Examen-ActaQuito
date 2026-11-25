@@ -26,10 +26,12 @@ export function sanearEvento(evento: Event, equipo: Equipo, pantalla: PantallaTe
     timestamp: Number.isFinite(evento.timestamp) ? evento.timestamp : undefined,
     type: undefined,
     platform: 'javascript',
+    environment: evento.environment === 'development' ? 'development' : 'production',
     level: 'error',
     release: typeof evento.release === 'string' && /^[\w.@+-]{1,100}$/.test(evento.release) ? evento.release : undefined,
     dist: typeof evento.dist === 'string' && /^[\w.-]{1,40}$/.test(evento.dist) ? evento.dist : undefined,
     tags: {
+      ...(evento.tags?.prueba === 'javascript-controlada' ? { prueba: 'javascript-controlada' } : {}),
       pantalla: pantallas.includes(pantalla) ? pantalla : 'desconocida',
       ...(operacion === 'carga-evidencia' || operacion === 'sincronizacion-actas' ? { operacion } : {}),
     },

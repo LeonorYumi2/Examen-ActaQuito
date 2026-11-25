@@ -47,7 +47,7 @@ export const CampoBusqueda: React.FC<CampoBusquedaProps> = ({
   const tieneTexto = Boolean(valor && valor.trim().length > 0);
 
   return (
-    <View style={[styles.container, style]}>
+    <View className="h-[44px] flex-row items-center border-editorial-borde bg-editorial-superficie" style={[styles.container, style]}>
       <Search
         size={16}
         color={BrandColors.textoSecundario}
@@ -84,14 +84,9 @@ export const CampoBusqueda: React.FC<CampoBusquedaProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: BrandColors.blancoSuperficie,
     borderRadius: Radii.md,
     borderWidth: 1,
-    borderColor: BrandColors.azulBorde,
     paddingHorizontal: Spacing.sm,
-    height: 44,
   },
   searchIcon: {
     marginRight: 8,

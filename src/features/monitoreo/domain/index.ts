@@ -7,6 +7,4 @@
  * conteo preliminar por candidato/dignidad y trazabilidad de actas en mapa.
  */
 
-export * from './entities';
-export * from './repositories';
-export * from './usecases';
+export * from './seguimiento-electoral';

@@ -16,6 +16,9 @@ export interface MesaJrvInfo {
   recintoNombre: string;
   numero: number;
   actasCount?: number;
+  veedorAsignadoId?: string;
+  veedorAsignadoNombre?: string;
+  asignacionVigenteId?: string;
 }
 
 export interface CoordinadorRecintoInfo {
@@ -49,6 +52,11 @@ export interface VeedorInfo {
   recintoBase: string;
   habilitado: boolean;
   mesaAsignada?: number;
+  asignacionId?: string;
+  correo?: string;
+  telefono?: string;
+  cedula?: string;
+  creadoEn?: string;
 }
 
 export interface VeedorMesaInfo {
@@ -396,8 +404,8 @@ export const operacionesPorRolRepositorio = {
     const [recintoRes, mesasRes, veedoresRes, asigVeedoresRes] = await Promise.all([
       db.from('recintos').select('codigo,nombre,parroquia_codigo,latitud,longitud').eq('codigo', recintoCodigo).maybeSingle(),
       db.from('mesas_jrv').select('recinto_codigo,numero').eq('recinto_codigo', recintoCodigo).order('numero'),
-      db.from('usuarios').select('id,nombres,apellidos,recinto_base,habilitado').eq('rol', 'veedor').eq('recinto_base', recintoCodigo),
-      db.from('asignaciones_veedor').select('veedor_id,mesa_numero').eq('recinto_codigo', recintoCodigo).is('fin', null),
+      db.from('usuarios').select('id,nombres,apellidos,recinto_base,habilitado,correo,telefono,cedula,creado_en').eq('rol', 'veedor').eq('recinto_base', recintoCodigo),
+      db.from('asignaciones_veedor').select('id,veedor_id,mesa_numero').eq('recinto_codigo', recintoCodigo).is('fin', null),
     ]);
 
     if (recintoRes.error) throw new Error(traducirErrorSupabase(recintoRes.error.message));
@@ -416,9 +424,21 @@ export const operacionesPorRolRepositorio = {
       parroquiaNombre = parroquiaData.nombre;
     }
 
-    const mesaMap = new Map<string, number>();
+    const mesaMap = new Map<string, { mesaNumero: number; asignacionId: string }>();
+    const veedorMap = new Map<string, { id: string; nombres: string; apellidos: string }>();
+    (veedoresRes.data ?? []).forEach((v) => {
+      veedorMap.set(v.id, { id: v.id, nombres: v.nombres, apellidos: v.apellidos });
+    });
+
+    const asigPorMesa = new Map<number, { veedorId: string; veedorNombre: string; asignacionId: string }>();
     (asigVeedoresRes.data ?? []).forEach((av) => {
-      mesaMap.set(av.veedor_id, av.mesa_numero);
+      mesaMap.set(av.veedor_id, { mesaNumero: av.mesa_numero, asignacionId: av.id });
+      const v = veedorMap.get(av.veedor_id);
+      asigPorMesa.set(av.mesa_numero, {
+        veedorId: av.veedor_id,
+        veedorNombre: v ? `${v.nombres} ${v.apellidos}` : 'Veedor asignado',
+        asignacionId: av.id,
+      });
     });
 
     const veedores: VeedorInfo[] = (veedoresRes.data ?? []).map((v) => ({
@@ -427,14 +447,25 @@ export const operacionesPorRolRepositorio = {
       apellidos: v.apellidos,
       recintoBase: v.recinto_base ?? recintoCodigo,
       habilitado: v.habilitado,
-      mesaAsignada: mesaMap.get(v.id),
+      mesaAsignada: mesaMap.get(v.id)?.mesaNumero,
+      asignacionId: mesaMap.get(v.id)?.asignacionId,
+      correo: v.correo,
+      telefono: v.telefono,
+      cedula: v.cedula,
+      creadoEn: v.creado_en,
     }));
 
-    const mesas: MesaJrvInfo[] = (mesasRes.data ?? []).map((m) => ({
-      recintoCodigo: m.recinto_codigo,
-      recintoNombre: datosRecinto.nombre,
-      numero: m.numero,
-    }));
+    const mesas: MesaJrvInfo[] = (mesasRes.data ?? []).map((m) => {
+      const asig = asigPorMesa.get(m.numero);
+      return {
+        recintoCodigo: m.recinto_codigo,
+        recintoNombre: datosRecinto.nombre,
+        numero: m.numero,
+        veedorAsignadoId: asig?.veedorId,
+        veedorAsignadoNombre: asig?.veedorNombre,
+        asignacionVigenteId: asig?.asignacionId,
+      };
+    });
 
     const recinto: RecintoInfo = {
       codigo: datosRecinto.codigo,

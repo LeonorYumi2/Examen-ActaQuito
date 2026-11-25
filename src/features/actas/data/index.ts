@@ -7,6 +7,3 @@
  * procesamiento de imágenes y cálculo de distancias GPS.
  */
 
-export * from './datasources';
-export * from './repositories';
-export * from './mappers';

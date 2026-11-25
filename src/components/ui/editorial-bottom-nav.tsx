@@ -64,6 +64,11 @@ function getIconForRoute(routeName: string, title?: string): LucideIcon {
   return FileText;
 }
 
+function renderRouteIcon(routeName: string, title?: string, color?: string, focused?: boolean) {
+  const Icon = getIconForRoute(routeName, title);
+  return <Icon size={18} color={color} strokeWidth={focused ? 2.2 : 1.8} />;
+}
+
 interface TabItemProps {
   name: string;
   title: string;
@@ -97,8 +102,6 @@ const TabItem: React.FC<TabItemProps> = ({
   const iconColor = isFocused ? activeColor : inactiveColor;
   const textColor = isFocused ? activeColor : inactiveColor;
 
-  const IconComponent = getIconForRoute(name, title);
-
   return (
     <TouchableOpacity
       accessibilityRole="tab"
@@ -113,7 +116,7 @@ const TabItem: React.FC<TabItemProps> = ({
         {tabBarIcon ? (
           tabBarIcon({ focused: isFocused, color: iconColor, size: 18 })
         ) : (
-          <IconComponent size={18} color={iconColor} strokeWidth={isFocused ? 2.2 : 1.8} />
+          renderRouteIcon(name, title, iconColor, isFocused)
         )}
         <Text
           style={[
@@ -174,8 +177,6 @@ export const EditorialBottomTabBar: React.FC<EditorialBottomTabBarProps> = ({
     if (hiddenRoutes.includes(route.name)) return false;
     const options = descriptors[route.key]?.options;
     if (options?.href === null || (options as any)?.href === false) return false;
-    if ((options as any)?.tabBarItemStyle?.display === 'none') return false;
-    if ((options as any)?.tabBarButton === null) return false;
     return true;
   });
 

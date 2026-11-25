@@ -7,6 +7,6 @@
  * verificación de nitidez, chips de estado y pantallas de corrección.
  */
 
-export * from './components';
-export * from './hooks';
 export * from './screens';
+export * from './components';
+export * from './RegistroActasScreen';

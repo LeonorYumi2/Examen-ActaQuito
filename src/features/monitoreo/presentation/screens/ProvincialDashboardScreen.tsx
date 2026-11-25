@@ -42,6 +42,7 @@ import { InstitutionalHeader } from '@/components/ui/institutional-header';
 import { CampoBusqueda } from '@/components/ui';
 import { DetalleRecintoModal } from '@/features/recintos/presentation/components';
 import { DetalleCoordinadorModal } from '@/features/users/presentation/components';
+import { DetalleActaModal } from '@/features/actas/presentation/components/DetalleActaModal';
 import { useAuth } from '@/features/auth/presentation/auth-state';
 import { useSeguimientoElectoral } from '../hooks/useSeguimientoElectoral';
 import {
@@ -71,6 +72,7 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
   const [busqueda, setBusqueda] = useState<string>('');
   const [recintoDetalleCodigo, setRecintoDetalleCodigo] = useState<string | null>(null);
   const [coordinadorDetalle, setCoordinadorDetalle] = useState<CoordinadorRecintoInfo | null>(null);
+  const [actaSeleccionada, setActaSeleccionada] = useState<ActaProvincialInfo | null>(null);
   const [resumen, setResumen] = useState<ResumenProvincial | null>(null);
   const [recintos, setRecintos] = useState<RecintoInfo[]>([]);
   const [coordinadores, setCoordinadores] = useState<CoordinadorRecintoInfo[]>([]);
@@ -483,7 +485,12 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
                   Transmisión y recepción en tiempo real
                 </Text>
                 {actas.slice(0, 3).map((acta) => (
-                  <View key={acta.id} style={styles.itemCard}>
+                  <TouchableOpacity
+                    key={acta.id}
+                    style={styles.itemCard}
+                    onPress={() => setActaSeleccionada(acta)}
+                    activeOpacity={0.7}
+                  >
                     <View style={styles.actaHeader}>
                       <View style={styles.actaDignidadBadge}>
                         <Text style={styles.actaDignidadText}>
@@ -507,12 +514,15 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
                       </View>
                     </View>
                     <View style={styles.actaBody}>
-                      <Text style={styles.itemTitle}>{acta.recintoNombre}</Text>
+                      <View style={styles.actaBodyTitleRow}>
+                        <Text style={styles.itemTitle}>{acta.recintoNombre}</Text>
+                        <ChevronRight size={15} color={BrandColors.textoMuted} />
+                      </View>
                       <Text style={styles.actaMesaText}>
                         Junta Receptora #{String(acta.mesaNumero).padStart(3, '0')}
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
@@ -851,6 +861,18 @@ export const ProvincialDashboardScreen: React.FC<ProvincialDashboardScreenProps>
         onAsignacionExitosa={() => {
           void cargarDatos();
         }}
+      />
+
+      {/* Modal de Detalle e Historial de Acta */}
+      <DetalleActaModal
+        visible={Boolean(actaSeleccionada)}
+        actaId={actaSeleccionada?.id ?? null}
+        mesaInfo={{
+          recintoNombre: actaSeleccionada?.recintoNombre,
+          mesaNumero: actaSeleccionada?.mesaNumero,
+          dignidad: actaSeleccionada?.dignidadCodigo,
+        }}
+        onClose={() => setActaSeleccionada(null)}
       />
     </SafeAreaView>
   );
@@ -1194,6 +1216,11 @@ const styles = StyleSheet.create({
   },
   actaBody: {
     marginTop: 2,
+  },
+  actaBodyTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   actaMesaText: {
     fontFamily: FontFamilies.bodySemiBold,

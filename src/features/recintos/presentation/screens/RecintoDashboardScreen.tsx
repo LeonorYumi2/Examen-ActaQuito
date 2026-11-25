@@ -31,6 +31,8 @@ import { BrandColors, Elevations, Radii, Spacing, FontFamilies } from '@/constan
 import { InstitutionalHeader } from '@/components/ui/institutional-header';
 import { CampoBusqueda } from '@/components/ui';
 import { useAuth } from '@/features/auth/presentation/auth-state';
+import { DetalleActaModal } from '@/features/actas/presentation/components/DetalleActaModal';
+import { DetalleVeedorModal } from '@/features/users/presentation/components';
 import {
   operacionesPorRolRepositorio,
   type RecintoInfo,
@@ -63,6 +65,8 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
   const [mesas, setMesas] = useState<MesaJrvInfo[]>([]);
   const [veedores, setVeedores] = useState<VeedorInfo[]>([]);
   const [actas, setActas] = useState<ActaProvincialInfo[]>([]);
+  const [actaSeleccionada, setActaSeleccionada] = useState<ActaProvincialInfo | null>(null);
+  const [veedorSeleccionado, setVeedorSeleccionado] = useState<VeedorInfo | null>(null);
   const [error, setError] = useState<string>();
 
   const cargarDatos = async () => {
@@ -406,7 +410,12 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
                       </View>
                     ) : (
                       veedoresFiltrados.map((v) => (
-                        <View key={v.id} style={styles.veedorCard}>
+                        <TouchableOpacity
+                          key={v.id}
+                          style={styles.veedorCard}
+                          onPress={() => setVeedorSeleccionado(v)}
+                          activeOpacity={0.7}
+                        >
                           <View style={styles.veedorAvatar}>
                             <Text style={styles.veedorAvatarText}>
                               {v.nombres.charAt(0)}
@@ -440,7 +449,8 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
                               {v.habilitado ? 'Habilitado' : 'Inactivo'}
                             </Text>
                           </View>
-                        </View>
+                          <ChevronRight size={16} color={BrandColors.azulTitulos} />
+                        </TouchableOpacity>
                       ))
                     )}
                   </>
@@ -463,7 +473,12 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
                       </View>
                     ) : (
                       actasFiltradas.map((acta) => (
-                        <View key={acta.id} style={styles.actaCard}>
+                        <TouchableOpacity
+                          key={acta.id}
+                          style={styles.actaCard}
+                          onPress={() => setActaSeleccionada(acta)}
+                          activeOpacity={0.7}
+                        >
                           <View style={styles.actaTop}>
                             <View style={styles.actaDignidadBadge}>
                               <Text style={styles.actaDignidadText}>
@@ -493,9 +508,12 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
                             </View>
                           </View>
 
-                          <Text style={styles.actaMesaNumber}>
-                            Junta Receptora del Voto #{String(acta.mesaNumero).padStart(3, '0')}
-                          </Text>
+                          <View style={styles.actaTitleRow}>
+                            <Text style={styles.actaMesaNumber}>
+                              Junta Receptora del Voto #{String(acta.mesaNumero).padStart(3, '0')}
+                            </Text>
+                            <ChevronRight size={16} color={BrandColors.azulTitulos} />
+                          </View>
 
                           <View style={styles.actaBottom}>
                             <View style={styles.actaMetaItem}>
@@ -514,7 +532,7 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
                               </View>
                             ) : null}
                           </View>
-                        </View>
+                        </TouchableOpacity>
                       ))
                     )}
                   </>
@@ -523,6 +541,30 @@ export const RecintoDashboardScreen: React.FC<RecintoDashboardScreenProps> = ({
             )}
           </>
         ) : null}
+
+        {/* Modal de Detalle e Historial de Acta */}
+        <DetalleActaModal
+          visible={!!actaSeleccionada}
+          actaId={actaSeleccionada?.id ?? null}
+          mesaInfo={{
+            recintoNombre: actaSeleccionada?.recintoNombre ?? recinto?.nombre,
+            mesaNumero: actaSeleccionada?.mesaNumero,
+            dignidad: actaSeleccionada?.dignidadCodigo,
+          }}
+          onClose={() => setActaSeleccionada(null)}
+        />
+
+        {/* Modal de Detalle y Asignación de Mesa a Veedor (ADR-02) */}
+        <DetalleVeedorModal
+          visible={!!veedorSeleccionado}
+          veedor={veedorSeleccionado}
+          recinto={recinto}
+          mesas={mesas}
+          onClose={() => setVeedorSeleccionado(null)}
+          onAsignacionExitosa={() => {
+            void cargarDatos();
+          }}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -916,11 +958,16 @@ const styles = StyleSheet.create({
   actaEvidenciaTextDraft: {
     color: BrandColors.textoSecundario,
   },
+  actaTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   actaMesaNumber: {
     fontFamily: FontFamilies.titleBold,
     fontSize: 12.5,
     color: BrandColors.azulTitulos,
-    marginTop: 4,
   },
   actaBottom: {
     flexDirection: 'row',

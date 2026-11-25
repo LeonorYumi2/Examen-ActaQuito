@@ -7,6 +7,9 @@
  * auditoría inmutable, evidencia fotográfica y coordenadas de actas de escrutinio.
  */
 
-export * from './entities';
-export * from './repositories';
-export * from './usecases';
+export * from './enviar-borrador';
+export * from './envio-evidencia';
+export * from './evidencia';
+export * from './historial-acta';
+export * from './registro';
+export * from './sincronizacion';
